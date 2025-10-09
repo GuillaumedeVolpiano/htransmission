@@ -2,18 +2,19 @@
 
 module Main where
 
-import           Effectful               (runEff)
-import           Effectful.Reader.Static (runReader)
-import           Effectful.Wreq          (runWreq)
-import Transmission.RPC.Client (fromUrl, getTorrent)
-import           Options.Applicative     (Parser, execParser, fullDesc,
-                                          help, helper, info, long, metavar, progDesc, short, strOption,
-                                          value, (<**>))
-import Effectful.Log (runLog, LogLevel (LogTrace))
-import Log.Backend.StandardOutput (withStdOutLogger)
-import Effectful.Time (runTime)
-import qualified Data.Text as T (pack)
-import Transmission.RPC.Types (ID(ID))
+import qualified Data.Text                  as T (pack)
+import           Effectful                  (runEff)
+import           Effectful.Log              (LogLevel (LogTrace), runLog)
+import           Effectful.Prim.IORef       (runPrim)
+import           Effectful.Reader.Static    (runReader)
+import           Effectful.Time             (runTime)
+import           Effectful.Wreq             (runWreq)
+import           Log.Backend.StandardOutput (withStdOutLogger)
+import           Options.Applicative        (Parser, execParser, fullDesc, help,
+                                             helper, info, long, metavar,
+                                             progDesc, short, strOption, value,
+                                             (<**>))
+import           Transmission.RPC.Client    (fromUrl, getSession)
 
 newtype Args = Args {
                  getHost :: String
@@ -28,8 +29,8 @@ main :: IO ()
 main = do
   (Args url) <- execParser . info (args <**> helper) $ (fullDesc <> progDesc "A command line to communicate with transmission-daemon")
 
-  result <- runEff . runWreq $ do 
+  result <- runEff . runWreq . runPrim $ do
                                   client <- fromUrl url Nothing Nothing
                                   withStdOutLogger $ \stdoutLogger -> do
-                                    runReader client . runLog (T.pack "htransmission") stdoutLogger LogTrace . runTime $ getTorrent (ID 1) Nothing Nothing
+                                    runReader client . runLog (T.pack "htransmission") stdoutLogger LogTrace . runTime $ getSession Nothing Nothing
   print result

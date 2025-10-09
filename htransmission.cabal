@@ -77,6 +77,7 @@ executable htransmission
     , base                  ^>=4.21.0.0
     , bytestring            ^>=0.12.2.0
     , case-insensitive      ^>=1.2.1.0
+    , effectful             ^>=2.5.1.0
     , effectful-core        ^>=2.5.1.0
     , http-client           ^>=0.7.1.9
     , lens                  ^>=5.3.3
@@ -84,7 +85,7 @@ executable htransmission
     , log-effectful         ^>=1.0.1.0
     , monad-time-effectful  ^>=1.0.0.0
     , optparse-applicative  ^>=0.18.1.0
-    , text ^>=2.1.2
+    , text                  ^>=2.1.2
     , transmission-rpc      ^>=0.1.0.0
     , wreq-effectful        ^>=0.1.1.1
 
