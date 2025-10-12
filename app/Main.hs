@@ -14,7 +14,7 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              helper, info, long, metavar,
                                              progDesc, short, strOption, value,
                                              (<**>))
-import           Transmission.RPC.Client    (fromUrl, getSession)
+import           Transmission.RPC.Client    (fromUrl, sessionStats)
 
 newtype Args = Args {
                  getHost :: String
@@ -32,5 +32,5 @@ main = do
   result <- runEff . runWreq . runPrim $ do
                                   client <- fromUrl url Nothing Nothing
                                   withStdOutLogger $ \stdoutLogger -> do
-                                    runReader client . runLog (T.pack "htransmission") stdoutLogger LogTrace . runTime $ getSession Nothing Nothing
+                                    runReader client . runLog (T.pack "htransmission") stdoutLogger LogTrace . runTime $ sessionStats Nothing
   print result
