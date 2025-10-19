@@ -67,8 +67,11 @@ executable htransmission
 
   -- Modules included in this executable, other than Main.
   other-modules:
-    Effectful.Brick
+    Constants
+    Effectful.Unix
+    Types
     UI.Views
+    Utils
 
   -- LANGUAGE extensions used by modules in this package.
   -- other-extensions:
@@ -80,8 +83,11 @@ executable htransmission
     , brick                 ^>=2.10
     , bytestring            ^>=0.12.2.0
     , case-insensitive      ^>=1.2.1.0
+    , directory             ^>=1.3.9.0
     , effectful             ^>=2.5.1.0
     , effectful-core        ^>=2.5.1.0
+    , effectful-th          ^>=1.0.0.3
+    , filepath ^>=1.5.4.0
     , http-client           ^>=0.7.1.9
     , lens                  ^>=5.3.3
     , log-base              ^>=0.12.1.0
@@ -89,14 +95,15 @@ executable htransmission
     , monad-time-effectful  ^>=1.0.0.0
     , optparse-applicative  ^>=0.18.1.0
     , text                  ^>=2.1.2
-    , time ^>=1.14
+    , time                  ^>=1.14
     , transmission-rpc      ^>=0.1.0.0
+    , unix                  ^>=2.8.6.0
+    , vty                   ^>=6.2
     , wreq-effectful        ^>=0.1.1.1
 
   -- Directories containing source files.
-  hs-source-dirs:   app, lib
+  hs-source-dirs:   app lib
 
   -- Base language which the package is written in.
   default-language: Haskell2010
-
-  ghc-options: -threaded "-with-rtsopts=-N4"
+  ghc-options:      -threaded -with-rtsopts=-N4

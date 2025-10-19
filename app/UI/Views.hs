@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module UI.Views (
-  mainView
+  mkView
   )
 where
 import           Brick.Widgets.Border       (border)
@@ -17,7 +17,7 @@ import           Data.Time.Clock            (UTCTime (utctDay),
                                              nominalDiffTimeToSeconds)
 import           Data.Time.Clock.POSIX      (posixSecondsToUTCTime)
 import           Data.Time.Format.ISO8601   (iso8601Show)
-import           Effectful.Brick            (Padding (..), Widget, hLimit,
+import           Brick            (Padding (..), Widget, hLimit,
                                              padLeft, padRight, str, txt,
                                              vLimit, vLimitPercent,
                                              withBorderStyle, (<+>), (<=>))
@@ -34,6 +34,12 @@ import           Transmission.RPC.Torrent   (ETA (ETA, NA, Unknown), Torrent,
                                              rateDownload, rateUpload, ratio,
                                              totalSize, uploadedEver, webseeds,
                                              webseedsSendingToUs)
+import Types (AppState(AppState), View (..))
+
+
+mkView :: AppState -> [Widget Int]
+mkView (AppState Main t s ss) = [mainView t s ss]
+mkView (AppState Prune _ _ _) = undefined
 
 emptyBordersStyle :: BorderStyle
 emptyBordersStyle = defaultBorderStyle {bsVertical = ' '
@@ -69,7 +75,7 @@ mainTorrentsView torrents = withBorderStyle emptyBordersStyle
                                                                   map (map (vLimit 1) . mainTorrentView) torrents)
 
 mainTorrentView :: Ord n => Torrent -> [Widget n]
-mainTorrentView torrent = [hLimit 40 (txt . fromMaybe "" $ name torrent)
+mainTorrentView torrent = [hLimit 40 (str . fromMaybe "" $ name torrent)
   , hLimit 16 . percentView . fromMaybe 0 $ percentComplete torrent
   , hLimit 10 . sizeView . fromMaybe 0 $ downloadedEver torrent
   , (hLimit 14 . sizeView . fromMaybe 0 $ rateDownload torrent) <+> str "/s"
