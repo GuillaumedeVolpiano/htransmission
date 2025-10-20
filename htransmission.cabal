@@ -71,6 +71,7 @@ executable htransmission
     Effectful.Unix
     Types
     UI.Events
+    UI.KeyEvents
     UI.Views
     Utils
 

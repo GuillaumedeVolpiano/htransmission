@@ -4,11 +4,12 @@ module UI.Events (
                  , eventHandler
                  , startTimer
                  , updateView
-                 , getElements)
+                 , getElements
+                 , switchView)
 where
 
 import           Brick                    (App, BrickEvent (AppEvent, VtyEvent),
-                                           EventM, gets, halt, put)
+                                           EventM, gets, modify)
 import           Brick.BChan              (BChan, writeBChan)
 import           Constants                (basicSession, mainTorrents,
                                            matchedTorrents)
@@ -22,46 +23,50 @@ import           Effectful.Prim           (runPrim)
 import           Effectful.Reader.Static  (runReader)
 import           Effectful.Time           (runTime)
 import           Effectful.Wreq           (runWreq)
-import           Graphics.Vty             (Event (EvKey), Key (KEsc))
+import           Graphics.Vty             (Event (EvKey))
 import           Log.Backend.Text         (withSimpleTextLogger)
 import           Prelude                  hiding (log)
 import           Transmission.RPC.Client  (Client, getSession, getTorrents,
                                            sessionStats)
 import           Transmission.RPC.Session (Session, SessionStats)
 import           Transmission.RPC.Torrent (Torrent)
-import qualified Types                    as T (client, log, view)
-import           Types                    (AppState (AppState), Events (..),
-                                           View (Main, Prune))
+import qualified Types                    as T (client, log, view, torrents, session, sessionStats, keyHandler)
+import           Types                    (Events (..),
+                                           View (..), AppState)
+import Brick.Keybindings (handleKey)
 
 appStartEvent :: App AppState Events ()
 appStartEvent = undefined
 
-startTimer :: BChan Events -> IO ()
+startTimer :: BChan Events -> IO ()
 startTimer chan = void $ forkIO $ forever $ do
   void $ threadDelay 1000000
   writeBChan chan Tick
 
-eventHandler :: BrickEvent n Events -> EventM n AppState ()
-eventHandler e = case e of
-                     AppEvent Tick            -> updateView
-                     VtyEvent (EvKey KEsc []) -> halt
-                     _                        -> pure ()
+eventHandler :: BrickEvent Int Events -> EventM Int AppState ()
+eventHandler (AppEvent Tick) = updateView
+eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
+
+
+eventHandler _ = pure ()
 
 updateView :: EventM n AppState ()
 updateView = do
   view <- gets T.view
   client <- gets T.client
-  log <- gets T.log
   (getElemsLog, (torrents, sesh, seshStats)) <- liftIO $ getElements view client
-  put (AppState view client torrents sesh seshStats (getElemsLog : log))
+  modify (\a -> a{T.torrents = torrents, T.session=sesh, T.sessionStats = seshStats, T.log = getElemsLog : T.log a})
 
 getElements :: View -> Client -> IO (Text, ([Torrent], Session, SessionStats))
 getElements view client = withSimpleTextLogger $ \textLogger -> do
   runEff . runWreq . runPrim . runReader client . runLog "htransmission" textLogger LogTrace . runTime $ do
     let fields = case view of
-                Main  -> mainTorrents
                 Prune -> matchedTorrents
+                _     -> mainTorrents
     torrents <- getTorrents Nothing (Just fields) Nothing
     sesh <- getSession (Just basicSession) Nothing
     seshStats <- sessionStats Nothing
     pure (torrents, sesh, seshStats)
+
+switchView :: View -> EventM n AppState ()
+switchView view = modify (\a -> a{T.view = view})

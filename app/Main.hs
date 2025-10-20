@@ -25,6 +25,7 @@ import           Types                      (AppState (AppState), Events,
 import           UI.Events                  (eventHandler, getElements,
                                              startTimer)
 import           UI.Views                   (mkView)
+import UI.KeyEvents (keyConfig, dispatcher)
 
 newtype Args = Args {
                  getHost :: String
@@ -52,6 +53,6 @@ main = do
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
   (getElemsLog, (torrents, sesh, seshStats)) <- getElements Main client
-  let appState = AppState Main client torrents sesh seshStats [getElemsLog]
+  let appState = AppState Main client torrents sesh seshStats [getElemsLog] keyConfig dispatcher
   finalState <- customMain vty (mkVty defaultConfig) (Just chan) app appState
   mapM_ T.putStr . reverse $ log finalState

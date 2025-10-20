@@ -7,7 +7,7 @@ import           Brick                     (Padding (..), Widget, emptyWidget,
                                             fill, hLimit, hLimitPercent,
                                             padLeft, padRight, str, txt, vLimit,
                                             vLimitPercent, (<+>), (<=>))
-import           Brick.Widgets.Border      (border)
+import           Brick.Widgets.Border      (border, hBorder)
 import           Brick.Widgets.ProgressBar (progressBar)
 import           Data.Maybe                (fromMaybe)
 import           Data.Ratio                ((%))
@@ -23,18 +23,32 @@ import           Transmission.RPC.Session  (Session, SessionStats, currentStats,
                                             speedLimitUpEnabled, uploadSpeed,
                                             uploadedBytes)
 import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
-                                            addedDate, downloadedEver, eta,
-                                            labels, name, peers, peersConnected,
-                                            percentComplete, rateDownload,
-                                            rateUpload, ratio, totalSize,
-                                            uploadedEver, webseeds,
-                                            webseedsSendingToUs)
-import           Types                     (View (..), AppState (AppState))
+                                            addedDate, downloadedEver,
+                                            errorCode, eta, labels, name, peers,
+                                            peersConnected, progress,
+                                            rateDownload, rateUpload, ratio,
+                                            status, totalSize, uploadedEver,
+                                            webseeds, webseedsSendingToUs)
+import qualified Transmission.RPC.Types    as TT (Error (..), Status (..))
+import           Types                     (AppState (AppState), View (..))
+import Brick.Widgets.Core (joinBorders)
 
 
 mkView :: AppState -> [Widget Int]
-mkView (AppState Main _ torrents sesh seshStats _) = [mainView torrents sesh seshStats]
-mkView (AppState Prune _ _ _ _ _) = undefined
+
+mkView (AppState Prune _ _ _ _ _ _ _) = undefined
+mkView (AppState view _ torrents sesh seshStats _ _ _) = 
+  pure $ mainView (filter (sel view) torrents) sesh seshStats
+
+sel :: View -> Torrent -> Bool
+sel Main        = const True
+sel Downloading = (== Just TT.Downloading) . status
+sel Seeding     = (== Just TT.Seeding) . status
+sel Complete    = (==100) . fromMaybe 0 . progress
+sel Paused      = (== Just TT.Stopped) . status
+sel Inactive    = \t -> rateDownload t == Just 0 && rateUpload t == Just 0
+sel Error       = (/= Just TT.OK) . errorCode
+sel Prune       = error "Thou shall not pass"
 
 mainTorrentsView :: Ord n => [Torrent] -> Widget n
 mainTorrentsView = foldr (\t v -> (vLimit 1 . mainTorrentView $ t) <=> v) emptyWidget
@@ -56,7 +70,7 @@ mainHeader = vLimit 1 (str " " <+> hLimitPercent 30 (padRight Max $ str "Name")
 
 mainTorrentView :: Ord n => Torrent -> Widget n
 mainTorrentView torrent = hLimitPercent 30 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
-  <+> hLimit 16 (padLeft Max (percentView . fromMaybe 0 $ percentComplete torrent)) <+> str "   "
+  <+> hLimit 16 (padLeft Max (percentView . fromMaybe 0 $ progress torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ downloadedEver torrent)) <+> str "   "
   <+> hLimit 14 (padLeft Max (sizeView . fromMaybe 0 $ rateDownload torrent) <+> str "/s")  <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ uploadedEver torrent)) <+> str "   "
@@ -135,5 +149,6 @@ limitView False _ = str "∞ "
 limitView _ lim   = sizeView lim <+> str "/s "
 
 mainView :: [Torrent] -> Session -> SessionStats -> Widget Int
-mainView torrents sesh seshStats = mainHeader <=> (vLimitPercent 90 . border . mainTorrentsView $ torrents)  
-  <=> sessionView sesh seshStats
+mainView torrents sesh seshStats = joinBorders . border $ mainHeader <=> hBorder
+  <=> (vLimitPercent 90 . mainTorrentsView $ torrents)
+  <=> hBorder <=> sessionView sesh seshStats

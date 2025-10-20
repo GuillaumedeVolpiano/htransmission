@@ -12,7 +12,7 @@ where
 import           Data.Text (Text)
 
 mainTorrents :: [Text]
-mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels"]
+mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "status", "progress", "labels", "errorCode"]
 
 matchedTorrents :: [Text]
 matchedTorrents = ["name", "uploadedEver", "rateUpload", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels", "downloadDir", "percentDone", "files"]
