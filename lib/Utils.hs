@@ -1,11 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections    #-}
 {-# LANGUAGE TypeOperators    #-}
+
 module Utils
   (extractPrunable
   , isRoot
   , replaceRoot
-  , mkPathMap)
+  , mkPathMap
+  )
 where
 import           Control.Monad            (forM)
 import           Data.List                (intersect, isPrefixOf, sortBy)
@@ -19,9 +21,9 @@ import           System.Posix             (FileID)
 import           Transmission.RPC.Torrent (Torrent, downloadDir,
                                            progress, files, fName, labels, name)
 import           Types                    (PathMap)
-import qualified Constants as C (labels)
+import qualified Constants as C (labels)
 
-extractPrunable :: (Unix :> es) => [(FilePath, FilePath)] -> PathMap -> [Torrent] -> Eff es  [Torrent]
+extractPrunable :: (Unix :> es) => [(FilePath, FilePath)] -> PathMap -> [Torrent] -> Eff es  [Torrent]
 extractPrunable arrs pathMap tors = do
   arrIDs <- forM arrs (\(root, full) -> (root, ) <$> (getAllPaths full >>= getFileNodes))
   torIDs <- forM (filter (\t -> ((==100) . fromJust . progress $ t) && (not . null . intersect C.labels . fromJust . labels $ t)) tors) (\t -> (t,) <$> (getFileNodes . buildFilesPath pathMap) t)
@@ -30,13 +32,13 @@ extractPrunable arrs pathMap tors = do
 getFileNodes :: (Unix :> es) => [FilePath] -> Eff es [FileID]
 getFileNodes fps = forM fps fileID
 
-getAllPaths :: (Unix :> es) => FilePath -> Eff es [FilePath]
+getAllPaths :: (Unix :> es) => FilePath -> Eff es [FilePath]
 getAllPaths fp = do
   isDir <- isDirectory fp
   if isDir then listDirectory fp >>= (concat <$>) . mapM (getAllPaths . (fp </>))
         else pure [fp]
 
-referenced :: PathMap -> [(FilePath, [FileID])] -> (Torrent, [FileID]) -> Bool
+referenced :: PathMap -> [(FilePath, [FileID])] -> (Torrent, [FileID]) -> Bool
 referenced pathMap arrs (tor, inodes) = not . null . intersect inodes . concatMap snd . filter (isRootIf . fst) $ arrs
   where
     maybeFP = downloadDir tor
@@ -61,7 +63,7 @@ mkPathMap pm fp = foldr remapIfMatch fp pm
       | isRoot from path = replaceRoot from to path
       | otherwise = path
 
-buildFilesPath :: PathMap -> Torrent -> [FilePath]
+buildFilesPath :: PathMap -> Torrent -> [FilePath]
 buildFilesPath pathMap torrent = map (dir </>) fns
   where
     fns = map fName . fromJust . files $ torrent

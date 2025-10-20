@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Constants (
-  basicTorrents,
+  mainTorrents,
+  matchedTorrents,
   basicSession,
   arrPaths,
   labels,
@@ -10,8 +11,11 @@ where
 
 import           Data.Text (Text)
 
-basicTorrents :: [Text]
-basicTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels", "downloadDir", "percentDone", "files"]
+mainTorrents :: [Text]
+mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels"]
+
+matchedTorrents :: [Text]
+matchedTorrents = ["name", "uploadedEver", "rateUpload", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels", "downloadDir", "percentDone", "files"]
 
 basicSession :: [Text]
 basicSession = ["speed-limit-down-enabled", "speed-limit-down", "speed-limit-up-enabled", "speed-limit-up"]
