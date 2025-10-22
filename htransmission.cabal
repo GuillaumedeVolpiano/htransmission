@@ -68,7 +68,6 @@ executable htransmission
   -- Modules included in this executable, other than Main.
   other-modules:
     Constants
-    Effectful.Unix
     Types
     UI.Events
     UI.KeyEvents
@@ -89,6 +88,7 @@ executable htransmission
     , effectful             ^>=2.5.1.0
     , effectful-core        ^>=2.5.1.0
     , effectful-th          ^>=1.0.0.3
+    , effectful-unix ^>=0.1.0.0
     , filepath              ^>=1.5.4.0
     , http-client           ^>=0.7.1.9
     , lens                  ^>=5.3.3

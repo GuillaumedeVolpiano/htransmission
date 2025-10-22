@@ -1,1 +1,1 @@
-packages: ., ../transmission-rpc
+packages: ., ../transmission-rpc, ../effectful-unix
