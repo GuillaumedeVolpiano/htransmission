@@ -1,54 +1,43 @@
 {-# LANGUAGE GADTs #-}
 module Types
-  (View(..),
-  AppState(AppState),
+  (
   PathMap,
-  Events(..),
-  KeyEvent(..),
-  view,
-  client,
-  torrents,
-  session,
-  sessionStats,
-  log,
-  keyBindings,
-  keyHandler
+  FIFOSet,
+  fifoQueue,
+  fifoSet,
+  enqueue,
+  dequeue,
+  newFIFOSet,
+  Action(..),
+  Sort(..)
   )
 where
-import Prelude hiding (log)
-import Transmission.RPC.Client (Client)
-import Transmission.RPC.Torrent (Torrent)
-import Transmission.RPC.Session (Session, SessionStats)
-import Data.Text (Text)
-import Brick.Keybindings (KeyConfig, KeyDispatcher)
-import Brick (EventM)
+import           Data.Sequence (Seq ((:|>)), ViewL (EmptyL, (:<)), viewl)
+import           Data.Set      (Set, delete, insert, member)
+import           Prelude       hiding (log)
 
-data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Prune deriving (Eq, Show)
-
-data KeyEvent = QuitEvent
-              | MainViewEvent
-              | DownloadingViewEvent
-              | SeedingViewEvent
-              | CompleteViewEvent
-              | PausedViewEvent
-              | InactiveViewEvent
-              | ErrorViewEvent
-              | PruneViewEvent
-            deriving (Eq, Ord)
+data Action = Global | Matched deriving (Eq, Ord)
 
 type PathMap = FilePath -> FilePath
 
-data AppState where
-  AppState :: {
-               view :: View,
-               client :: Client,
-               torrents :: [Torrent],
-               session :: Session,
-               sessionStats :: SessionStats,
-               log :: [Text],
-               keyBindings :: KeyConfig KeyEvent,
-               keyHandler :: KeyDispatcher KeyEvent (EventM Int AppState)
-               } ->
-                AppState
+data FIFOSet a where
+  FIFOSet :: {
+                 fifoQueue :: Seq a,
+                 fifoSet :: Set a
+             } -> FIFOSet a
 
-data Events = Tick
+data Sort = Name | PercentComplete | Downloaded | DownloadSpeed | Uploaded | UploadSpeed | ETA | Ratio | TotalSize
+  | Peers | Seeds | DateAdded | Labels deriving (Enum, Eq)
+
+enqueue :: Ord a => a -> FIFOSet a -> FIFOSet a
+enqueue x f@(FIFOSet q s)
+  | x `member` s = f
+  | otherwise = FIFOSet (q :|> x) (insert x s)
+
+dequeue :: Ord a => FIFOSet a -> Maybe (a, FIFOSet a)
+dequeue (FIFOSet q s) = case viewl q of
+                                EmptyL -> Nothing
+                                (x :< rest) -> Just (x, FIFOSet rest $ delete x s)
+
+newFIFOSet :: Ord a => FIFOSet a
+newFIFOSet = FIFOSet mempty mempty

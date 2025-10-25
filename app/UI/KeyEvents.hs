@@ -4,31 +4,28 @@ module UI.KeyEvents (
                       dispatcher
                     )
 where
-import Brick.Keybindings
-    ( Binding,
-      KeyEvents,
-      bind,
-      ctrl,
-      KeyConfig,
-      newKeyConfig,
-      KeyEventHandler,
-      onEvent,
-      EventTrigger(ByKey, ByEvent),
-      keyEventName,
-      khHandler,
-      kehEventTrigger,
-      kehHandler,
-      handlerDescription,
-      keyDispatcher )
-import           Brick.Keybindings.KeyEvents (keyEvents)
-import           Graphics.Vty                (Key (KEsc))
-import Brick (EventM, halt)
-import Types (AppState, KeyEvent(..), View (..))
-import UI.Events (switchView)
-import Brick.Keybindings.KeyDispatcher (KeyDispatcher)
-import Brick.Keybindings.Pretty (ppBinding)
-import qualified Data.Text as T (unpack)
-import Data.Maybe (fromJust)
+import           Brick                           (EventM, halt)
+import           Brick.Keybindings               (Binding,
+                                                  EventTrigger (ByEvent, ByKey),
+                                                  KeyConfig, KeyEventHandler,
+                                                  KeyEvents, bind, ctrl,
+                                                  handlerDescription,
+                                                  kehEventTrigger, kehHandler,
+                                                  keyDispatcher, keyEventName,
+                                                  khHandler, meta, newKeyConfig,
+                                                  onEvent, shift)
+import           Brick.Keybindings.KeyDispatcher (KeyDispatcher)
+import           Brick.Keybindings.KeyEvents     (keyEvents)
+import           Brick.Keybindings.Pretty        (ppBinding)
+import           Data.Maybe                      (fromJust)
+import qualified Data.Text                       as T (unpack)
+import           Graphics.Vty                    (Key (KChar, KDown, KFun, KUp, KEnter, KPageDown, KPageUp))
+import           UI.Events                       (cursorDown, cursorUp,
+                                                  menuOnOff, switchView, cursorTrigger,
+                                                  pageUp, pageDown, selectOne, selectAll,
+                                                  selectNone, selectUp, selectDown)
+import           UI.Types                        (AppState, KeyEvent (..),
+                                                  Menu (Sort), View (..))
 
 allKeyEvents :: KeyEvents KeyEvent
 allKeyEvents = keyEvents [
@@ -40,26 +37,49 @@ allKeyEvents = keyEvents [
                           ("paused view", PausedViewEvent),
                           ("inactive view", InactiveViewEvent),
                           ("error view", ErrorViewEvent),
-                          ("unreferenced view", PruneViewEvent)
+                          ("unreferenced view", PruneViewEvent),
+                          ("display sort menu", SortMenuEvent),
+                          ("close menu", CloseMenuEvent),
+                          ("move cursor down", CursorDownEvent),
+                          ("move cursor up", CursorUpEvent),
+                          ("cursor trigger", CursorTriggerEvent),
+                          ("move the main view one page down", PageDownEvent),
+                          ("move the main view one page up", PageUpEvent),
+                          ("select one item", SelectEvent),
+                          ("select all", SelectAllEvent),
+                          ("deselect all", SelectNoneEvent),
+                          ("select multiple, upwards", SelectUpEvent),
+                          ("select multiple, downwards", SelectDownEvent)
                          ]
 
 defaultBindings :: [(KeyEvent, [Binding])]
 defaultBindings = [
-                   (QuitEvent, [bind KEsc]),
-                   (MainViewEvent, [ctrl 'm']),
-                   (DownloadingViewEvent, [ctrl 'd']),
+                   (QuitEvent, [bind (KChar 'q')]),
+                   (MainViewEvent, [bind (KChar 'm')]),
+                   (DownloadingViewEvent, [meta 'd']),
                    (SeedingViewEvent, [ctrl 's']),
                    (CompleteViewEvent, [ctrl 'c']),
                    (PausedViewEvent, [ctrl 'p']),
-                   (InactiveViewEvent, [ctrl 'i']),
+                   (InactiveViewEvent, [meta 'i']),
                    (ErrorViewEvent, [ctrl 'e']),
-                   (PruneViewEvent, [ctrl 'u'])
+                   (PruneViewEvent, [ctrl 'u']),
+                   (SortMenuEvent, [bind (KFun 7)]),
+                   (CursorDownEvent, [bind KDown]),
+                   (CursorUpEvent, [bind KUp]),
+                   (CursorTriggerEvent, [bind KEnter]),
+                   (PageDownEvent, [bind KPageDown]),
+                   (PageUpEvent, [bind KPageUp]),
+                   (SelectEvent, [bind (KChar ' ')]),
+                   (SelectAllEvent, [ctrl 'a']),
+                   (SelectNoneEvent, [ctrl 'd']),
+                   (SelectUpEvent, [shift KUp]),
+                   (SelectDownEvent, [shift KDown])
                   ]
 
 keyConfig :: KeyConfig KeyEvent
 keyConfig = newKeyConfig allKeyEvents defaultBindings []
 
-handlers :: [KeyEventHandler KeyEvent (EventM n AppState)]
+handlers :: [KeyEventHandler KeyEvent (EventM String AppState)]
 handlers = [
             onEvent QuitEvent "Quit the program" halt,
             onEvent MainViewEvent "Switch to the main view" (switchView Main),
@@ -69,10 +89,21 @@ handlers = [
             onEvent PausedViewEvent "Switch to the paused view" (switchView Paused),
             onEvent InactiveViewEvent "Switch to the inactive view" (switchView Inactive),
             onEvent ErrorViewEvent "Switch to the error view" (switchView Error),
-            onEvent PruneViewEvent "Switch to the unreferenced view" (switchView Prune)
+            onEvent PruneViewEvent "Switch to the unreferenced view" (switchView Prune),
+            onEvent SortMenuEvent "Display the sort menu" (menuOnOff Sort),
+            onEvent CursorDownEvent "Move the cursor down" cursorDown,
+            onEvent CursorUpEvent "Move the cursor up" cursorUp,
+            onEvent CursorTriggerEvent "Trigger the cursor action" cursorTrigger,
+            onEvent PageDownEvent "Move the main viewport one page down" pageDown,
+            onEvent PageUpEvent "Move the main viewport one page up" pageUp,
+            onEvent SelectEvent "Toggle the selection of the cursor item" selectOne,
+            onEvent SelectAllEvent "Select everything" selectAll,
+            onEvent SelectNoneEvent "Deselect everything" selectNone,
+            onEvent SelectUpEvent "Toggle multiple selections, upwards" selectUp,
+            onEvent SelectDownEvent "Toggle multiple selections, downwards" selectDown 
            ]
 
-dispatcher :: KeyDispatcher KeyEvent (EventM n AppState)
+dispatcher :: KeyDispatcher KeyEvent (EventM String AppState)
 dispatcher = case keyDispatcher keyConfig handlers of
                Right d -> d
                Left collisions -> do

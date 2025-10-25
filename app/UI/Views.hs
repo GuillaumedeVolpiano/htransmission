@@ -5,11 +5,14 @@ module UI.Views (
 where
 import           Brick                     (Padding (..), Widget, emptyWidget,
                                             fill, hLimit, hLimitPercent,
-                                            padLeft, padRight, str, txt, vLimit,
-                                            vLimitPercent, (<+>), (<=>))
-import           Brick.Widgets.Border      (border, hBorder)
+                                            padBottom, padLeft, padRight, str,
+                                            txt, vBox, vLimit, vLimitPercent,
+                                            (<+>), (<=>), withAttr)
+import           Brick.Widgets.Border      (borderWithLabel, hBorder)
+import           Brick.Widgets.Core        (joinBorders)
 import           Brick.Widgets.ProgressBar (progressBar)
-import           Data.Maybe                (fromMaybe)
+import           Data.Maybe                (fromJust, fromMaybe, isNothing,
+                                            mapMaybe)
 import           Data.Ratio                ((%))
 import qualified Data.Text                 as T (intercalate)
 import           Data.Time.Clock           (UTCTime (utctDay),
@@ -23,38 +26,35 @@ import           Transmission.RPC.Session  (Session, SessionStats, currentStats,
                                             speedLimitUpEnabled, uploadSpeed,
                                             uploadedBytes)
 import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
-                                            addedDate, downloadedEver,
-                                            errorCode, eta, labels, name, peers,
-                                            peersConnected, progress,
-                                            rateDownload, rateUpload, ratio,
-                                            status, totalSize, uploadedEver,
-                                            webseeds, webseedsSendingToUs)
-import qualified Transmission.RPC.Types    as TT (Error (..), Status (..))
-import           Types                     (AppState (AppState), View (..))
-import Brick.Widgets.Core (joinBorders)
+                                            addedDate, downloadedEver, eta,
+                                            labels, name, peers, peersConnected,
+                                            progress, rateDownload, rateUpload,
+                                            ratio, totalSize, uploadedEver,
+                                            webseeds, webseedsSendingToUs, toId)
+import           UI.Types                  (AppState, Menu (NoMenu, Sort),
+                                            View (..), mainCursor, menuCursor,
+                                            session, sessionStats, view,
+                                            visibleMenu, selected)
+import           UI.Utils                  (highlightRow, sel)
+import Data.IntSet (IntSet, member)
+import UI.Attrs (selectedAttr)
 
+mkView :: AppState -> [Widget String]
+mkView s = pure .
+  showMenu $ mainWidget
+  where
+    mainWidget
+      | view s == Prune = matchedView Prune (mainCursor s) (sel s) (session s) (sessionStats s) (selected s)
+      | otherwise = mainView (view s) (mainCursor s) (sel s) (session s) (sessionStats s) (selected s)
+    showMenu = case visibleMenu s of
+                 NoMenu -> id
+                 Sort   -> (sortMenu (menuCursor s) <+>)
 
-mkView :: AppState -> [Widget Int]
-
-mkView (AppState Prune _ _ _ _ _ _ _) = undefined
-mkView (AppState view _ torrents sesh seshStats _ _ _) = 
-  pure $ mainView (filter (sel view) torrents) sesh seshStats
-
-sel :: View -> Torrent -> Bool
-sel Main        = const True
-sel Downloading = (== Just TT.Downloading) . status
-sel Seeding     = (== Just TT.Seeding) . status
-sel Complete    = (==100) . fromMaybe 0 . progress
-sel Paused      = (== Just TT.Stopped) . status
-sel Inactive    = \t -> rateDownload t == Just 0 && rateUpload t == Just 0
-sel Error       = (/= Just TT.OK) . errorCode
-sel Prune       = error "Thou shall not pass"
-
-mainTorrentsView :: Ord n => [Torrent] -> Widget n
-mainTorrentsView = foldr (\t v -> (vLimit 1 . mainTorrentView $ t) <=> v) emptyWidget
+mainTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String 
+mainTorrentsView mc selection = foldr (<=>) emptyWidget . highlightRow mc . map (vLimit 1 . mainTorrentView selection)
 
 mainHeader :: Ord n => Widget n
-mainHeader = vLimit 1 (str " " <+> hLimitPercent 30 (padRight Max $ str "Name")
+mainHeader = vLimit 1 (str "       " <+> hLimitPercent 30 (padRight Max $ str "Name")
   <+> hLimit 16 (padRight Max $ str "Percent complete") <+> str "   "
   <+> hLimit 10 (padRight Max $ str "Downloaded") <+> str "   "
   <+> hLimit 16 (padRight Max $ str "Download speed") <+> str "   "
@@ -68,17 +68,55 @@ mainHeader = vLimit 1 (str " " <+> hLimitPercent 30 (padRight Max $ str "Name")
   <+> hLimit 10 (padRight Max $ str "Date added") <+> str "   "
   <+> hLimit 20 (padRight Max $ str "Labels"))
 
-mainTorrentView :: Ord n => Torrent -> Widget n
-mainTorrentView torrent = hLimitPercent 30 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
+mainTorrentView :: Ord n => IntSet -> Torrent -> Widget n
+mainTorrentView selection torrent = select selection torrent $
+  hLimitPercent 30 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
   <+> hLimit 16 (padLeft Max (percentView . fromMaybe 0 $ progress torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ downloadedEver torrent)) <+> str "   "
   <+> hLimit 14 (padLeft Max (sizeView . fromMaybe 0 $ rateDownload torrent) <+> str "/s")  <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ uploadedEver torrent)) <+> str "   "
   <+> hLimit 14 (padLeft Max (sizeView . fromMaybe 0 $ rateUpload torrent) <+> str "/s") <+> str "   "
   <+> hLimit 8 (padLeft Max (etaView . fromMaybe NA $ eta torrent)) <+> str "   "
-  <+> hLimit 5 (padLeft Max (ratioView . fromMaybe 0 $ ratio torrent)) <+> str "   "
+  <+> hLimit 5 (padLeft Max (ratioView  $ ratio torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ totalSize torrent)) <+> str "   "
-  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ peersConnected torrent) (length . fromMaybe [] $ peers torrent))) <+> str "   "
+  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ peersConnected torrent) 
+    (length . fromMaybe [] $ peers torrent))) <+> str "   "
+  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ webseedsSendingToUs torrent) 
+    (length . fromMaybe [] $ webseeds torrent))) <+> str "   "
+  <+> hLimit 10 (padRight Max 
+    (str . iso8601Show . utctDay . fromMaybe (posixSecondsToUTCTime 0) $ addedDate torrent)) <+> str "   "
+  <+> hLimit 20 (padRight Max (txt . T.intercalate " " . fromMaybe [] $ labels torrent))
+
+select :: Ord n => IntSet -> Torrent -> Widget n -> Widget n
+select selection torrent
+      | fromJust (toId torrent) `member` selection = 
+        \w ->hLimit 3 (str "[*]") <+> str "   " <+> withAttr selectedAttr w
+      | otherwise = \w -> hLimit 3 (str "[ ]") <+> str "   " <+> w
+
+matchedTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String 
+matchedTorrentsView mainCounter selection = foldr (<=>) emptyWidget . highlightRow mainCounter . map (vLimit 1 . matchedTorrentView selection)
+
+matchedHeader :: Ord n => Widget n
+matchedHeader = vLimit 1 (str "       " <+> hLimitPercent 30 (padRight Max $ str "Name")
+  <+> hLimit 10 (padRight Max $ str "Downloaded") <+> str "   "
+  <+> hLimit 10 (padRight Max $ str "Uploaded") <+> str "   "
+  <+> hLimit 16 (padRight Max $ str "Upload speed") <+> str "   "
+  <+> hLimit 5 (padRight Max $ str "Ratio") <+> str "   "
+  <+> hLimit 10 (padRight Max $ str "Total size") <+> str "   "
+  <+> hLimit 10 (padRight Max $ str "Peers") <+> str "   "
+  <+> hLimit 10 (padRight Max $ str "Seeds") <+> str "   "
+  <+> hLimit 10 (padRight Max $ str "Date added") <+> str "   "
+  <+> hLimit 20 (padRight Max $ str "Labels"))
+
+matchedTorrentView :: Ord n => IntSet -> Torrent -> Widget n
+matchedTorrentView selection torrent = select selection torrent $
+  hLimitPercent 30 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
+  <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ downloadedEver torrent)) <+> str "   "
+  <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ uploadedEver torrent)) <+> str "   "
+  <+> hLimit 14 (padLeft Max (sizeView . fromMaybe 0 $ rateUpload torrent) <+> str "/s") <+> str "   "
+  <+> hLimit 5 (padLeft Max (ratioView  $ ratio torrent)) <+> str "   "
+  <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ totalSize torrent)) <+> str "   "
+  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ peersConnected torrent) (length . fromMaybe [] $ peers torrent)))
   <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ webseedsSendingToUs torrent) (length . fromMaybe [] $ webseeds torrent))) <+> str "   "
   <+> hLimit 10 (padRight Max (str . iso8601Show . utctDay . fromMaybe (posixSecondsToUTCTime 0) $ addedDate torrent)) <+> str "   "
   <+> hLimit 20 (padRight Max (txt . T.intercalate " " . fromMaybe [] $ labels torrent))
@@ -121,34 +159,53 @@ etaView (ETA t)
             weeks = div days 7
 etaView Unknown = padRight Max . str $ "unknown"
 
-ratioView :: Ord n => Rational -> Widget n
+ratioView :: Ord n => Maybe Rational -> Widget n
 ratioView r
+  | isNothing r = str "∞"
   | r' >= 100 = str . show . (round :: RealFrac a => a -> Int) $ r'
   | r' <= 0.01 = str "0"
   | otherwise = str . take 4 . show $ r'
   where
-    r' = fromRational r :: Double
+    r' = fromRational . fromJust $ r :: Double
 
 peersView :: Ord n => Int -> Int -> Widget n
 peersView connected total = str $ show connected ++ " of " ++ show total
 
 sessionView :: Ord n => Session -> SessionStats -> Widget n
-sessionView sesh seshStats = vLimit 1 $ padLeft Max (str "Down: ") <+> sizeView (downloadSpeed seshStats)
+sessionView sesh seshStats = padLeft Max (str "Down: ") <+> sizeView (downloadSpeed seshStats)
   <+> str "/s (" <+> sizeView db <+> str " | "
   <+> limitView (fromMaybe False $ speedLimitDownEnabled sesh) (fromMaybe 0 $ speedLimitDown sesh)
   <+> str ") Up: " <+> sizeView (uploadSpeed seshStats) <+> str "/s ("
   <+> sizeView ub <+> str " | "
   <+> limitView (fromMaybe False $ speedLimitUpEnabled sesh) (fromMaybe 0 $ speedLimitUp sesh)
-  <+> str ") Ratio: " <+> ratioView (fromIntegral ub % fromIntegral db) <+> hLimit 5 (fill ' ')
+  <+> str ") Ratio: " <+> ratioView (if fromIntegral db == (0 :: Int) then Nothing else Just (fromIntegral ub % fromIntegral db)) <+> hLimit 5 (fill ' ')
     where
       ub = uploadedBytes . currentStats $ seshStats
       db = downloadedBytes . currentStats $ seshStats
+
+torrentData :: Ord n => [Torrent] -> Widget n
+torrentData torrents = hLimitPercent 50 . padRight Max $
+  str "Total size: " <+> sizeView totSize
+
+  where
+    totSize = sum . mapMaybe totalSize $ torrents
 
 limitView :: Ord n => Bool -> Int -> Widget n
 limitView False _ = str "∞ "
 limitView _ lim   = sizeView lim <+> str "/s "
 
-mainView :: [Torrent] -> Session -> SessionStats -> Widget Int
-mainView torrents sesh seshStats = joinBorders . border $ mainHeader <=> hBorder
-  <=> (vLimitPercent 90 . mainTorrentsView $ torrents)
-  <=> hBorder <=> sessionView sesh seshStats
+mainView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Widget String
+mainView v mc torrents sesh seshStats selection = joinBorders . borderWithLabel (str . show $ v) $ mainHeader <=> hBorder
+  <=> (vLimitPercent 90 . mainTorrentsView mc selection $ torrents)
+  <=> hBorder <=> vLimit 1 (sessionView sesh seshStats)
+
+matchedView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Widget String
+matchedView v mc torrents sesh seshStats selection = joinBorders . borderWithLabel (str . show $ v) $ matchedHeader
+  <=> hBorder <=> (vLimitPercent 90 . matchedTorrentsView mc selection $ torrents)
+  <=> hBorder <=> vLimit 1 (torrentData torrents <+> sessionView sesh seshStats)
+
+sortMenu :: Int -> Widget n
+sortMenu mc = joinBorders . borderWithLabel (str "Sort by") . vLimitPercent 90 . padBottom Max
+  . hLimitPercent 10 . padRight Max . vBox .highlightRow mc $ [str "Name", str "Percent complete"
+  , str "Downloaded", str "Download speed", str "Uploaded", str "Upload speed", str "ETA", str "Ratio"
+  , str "Total size", str "Peers", str "Seeds", str "Date added", str "Labels"]

@@ -5,17 +5,18 @@ module Constants (
   basicSession,
   arrPaths,
   labels,
-  pathMap
+  pathMap,
+  mainViewportName
   )
 where
 
 import           Data.Text (Text)
 
 mainTorrents :: [Text]
-mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "status", "progress", "labels", "errorCode"]
+mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peersConnected", "webseeds", "dateCreated", "status", "progress", "labels", "error", "progress", "id"]
 
 matchedTorrents :: [Text]
-matchedTorrents = ["name", "uploadedEver", "rateUpload", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels", "downloadDir", "percentDone", "files"]
+matchedTorrents = ["name", "uploadedEver", "rateUpload", "uploadRatio", "totalSize", "peers", "webseeds", "dateCreated", "percentComplete", "labels", "downloadDir", "percentDone", "files", "id"]
 
 basicSession :: [Text]
 basicSession = ["speed-limit-down-enabled", "speed-limit-down", "speed-limit-up-enabled", "speed-limit-up"]
@@ -42,3 +43,6 @@ pathMap = [
   ("/var/lib/rtorrent/adult_uploads", "/opt/restricted/uploads"),
   ("/var/lib/rtorrent/downloads/whisparr", "/opt/restricted/downloads")
                         ]
+
+mainViewportName :: String
+mainViewportName = "main viewport"
