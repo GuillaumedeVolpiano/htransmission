@@ -1,72 +1,173 @@
-{-# LANGUAGE OverloadedStrings #-}
 module UI.Events (
-                   appStartEvent
-                 , eventHandler
-                 , startTimer
+                   eventHandler
                  , updateView
-                 , getElements
-                 , switchView)
+                 , switchView
+                 , menuOnOff
+                 , cursorDown
+                 , cursorUp
+                 , cursorTrigger
+                 , pageDown
+                 , pageUp
+                 , selectOne
+                 , selectAll
+                 , selectNone
+                 , selectUp
+                 , selectDown
+                 )
 where
 
-import           Brick                    (App, BrickEvent (AppEvent, VtyEvent),
-                                           EventM, gets, modify)
-import           Brick.BChan              (BChan, writeBChan)
-import           Constants                (basicSession, mainTorrents,
-                                           matchedTorrents)
-import           Control.Concurrent       (forkIO, threadDelay)
-import           Control.Monad            (forever, void)
+import           Brick                    (BrickEvent (AppEvent, VtyEvent),
+                                           EventM, get, gets, modify, put)
+import           Brick.Keybindings        (handleKey)
+import           Brick.Main               (continueWithoutRedraw)
+import           Control.Monad            (void, when)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
-import           Data.Text                (Text)
+import           Data.IntSet              (delete, insert, member)
+import           Data.Maybe               (fromJust)
 import           Effectful                (runEff)
-import           Effectful.Log            (LogLevel (LogTrace), runLog)
-import           Effectful.Prim           (runPrim)
-import           Effectful.Reader.Static  (runReader)
-import           Effectful.Time           (runTime)
-import           Effectful.Wreq           (runWreq)
+import           Effectful.Client         (enqueueShared)
+import           Effectful.Concurrent.STM (atomically, runConcurrent)
 import           Graphics.Vty             (Event (EvKey))
-import           Log.Backend.Text         (withSimpleTextLogger)
-import           Prelude                  hiding (log)
-import           Transmission.RPC.Client  (Client, getSession, getTorrents,
-                                           sessionStats)
-import           Transmission.RPC.Session (Session, SessionStats)
-import           Transmission.RPC.Torrent (Torrent)
-import qualified Types                    as T (client, log, view, torrents, session, sessionStats, keyHandler)
-import           Types                    (Events (..),
-                                           View (..), AppState)
-import Brick.Keybindings (handleKey)
+import           Transmission.RPC.Torrent (toId)
+import qualified UI.Types                 as T (keyHandler, queue, session,
+                                                sessionStats, torrents, view)
+import           UI.Types                 (AppState,
+                                           Events (..), Menu (NoMenu, Sort),
+                                           View, mainCursor, menuCursor,
+                                           reverseSort, selected, sortKey, visibleMenu)
+import           UI.Utils                 (actionFromView, sel)
+import qualified Data.IntSet as S (fromList)
 
-appStartEvent :: App AppState Events ()
-appStartEvent = undefined
+import Utils (sortTorrents)
 
-startTimer :: BChan Events -> IO ()
-startTimer chan = void $ forkIO $ forever $ do
-  void $ threadDelay 1000000
-  writeBChan chan Tick
-
-eventHandler :: BrickEvent Int Events -> EventM Int AppState ()
-eventHandler (AppEvent Tick) = updateView
+eventHandler :: BrickEvent String Events -> EventM String AppState ()
+eventHandler (AppEvent Tick) = updateView False >> continueWithoutRedraw
+eventHandler (AppEvent (Updated isSwitching view torrents sesh seshStats)) =
+  if isSwitching then modify (\a -> a{T.view = view, T.torrents = sortTorrents (sortKey a) (reverseSort a) torrents, T.session = sesh
+    , T.sessionStats = seshStats})
+  else do
+    curView <- gets T.view
+    if actionFromView view == actionFromView curView then
+                                         modify (\a -> a{T.torrents = sortTorrents (sortKey a) (reverseSort a) torrents, T.session = sesh
+                                           , T.sessionStats = seshStats})
+                                         else continueWithoutRedraw
 eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
-
-
 eventHandler _ = pure ()
 
-updateView :: EventM n AppState ()
-updateView = do
+updateView :: Bool -> EventM n AppState ()
+updateView isSwitching = do
   view <- gets T.view
-  client <- gets T.client
-  (getElemsLog, (torrents, sesh, seshStats)) <- liftIO $ getElements view client
-  modify (\a -> a{T.torrents = torrents, T.session=sesh, T.sessionStats = seshStats, T.log = getElemsLog : T.log a})
-
-getElements :: View -> Client -> IO (Text, ([Torrent], Session, SessionStats))
-getElements view client = withSimpleTextLogger $ \textLogger -> do
-  runEff . runWreq . runPrim . runReader client . runLog "htransmission" textLogger LogTrace . runTime $ do
-    let fields = case view of
-                Prune -> matchedTorrents
-                _     -> mainTorrents
-    torrents <- getTorrents Nothing (Just fields) Nothing
-    sesh <- getSession (Just basicSession) Nothing
-    seshStats <- sessionStats Nothing
-    pure (torrents, sesh, seshStats)
+  fifoVar <- gets T.queue
+  liftIO $ runEff . runConcurrent . atomically $ do
+    enqueueShared (isSwitching, view) fifoVar
 
 switchView :: View -> EventM n AppState ()
-switchView view = modify (\a -> a{T.view = view})
+switchView view = modify (\a -> a{T.view=view}) >> updateView True >> continueWithoutRedraw
+
+menuOnOff :: Menu -> EventM n AppState ()
+menuOnOff menu = do
+  curMenu <- gets visibleMenu
+  let menu' = if curMenu == menu then NoMenu else menu
+  modify (\s -> s{visibleMenu = menu', menuCursor = 0})
+
+
+cursorDown :: EventM n AppState ()
+cursorDown = do
+  vm <- gets visibleMenu
+  if vm  == NoMenu then cursorDownMain else cursorDownMenu
+
+cursorDownMain :: EventM n AppState ()
+cursorDownMain = do
+  s <- get
+  let cursor = mainCursor s
+      tors = sel s
+      cursor' = min (cursor + 1) (length tors - 1)
+  put s {mainCursor = cursor'}
+
+cursorDownMenu :: EventM n AppState ()
+cursorDownMenu = do
+  menu <- gets visibleMenu
+  cursor <- gets menuCursor
+  let menuSize = case menu of
+                   Sort   -> 12
+                   NoMenu -> undefined
+      cursor' = min (cursor + 1) menuSize
+  modify (\s -> s {menuCursor = cursor'})
+
+cursorUp :: EventM n AppState ()
+cursorUp = do
+  vm <- gets visibleMenu
+  if vm == NoMenu then cursorUpMain else cursorUpMenu
+
+cursorUpMain :: EventM n AppState ()
+cursorUpMain = do
+  cursor <- gets mainCursor
+  let cursor' = max (cursor - 1) 0
+  modify (\s -> s {mainCursor = cursor'})
+
+cursorUpMenu :: EventM n AppState ()
+cursorUpMenu = do
+  cursor <- gets menuCursor
+  let cursor' = max (cursor - 1) 0
+  modify (\s -> s{menuCursor = cursor'})
+
+cursorTrigger :: EventM n AppState ()
+cursorTrigger = do
+  vm <- gets visibleMenu
+  case vm of
+    NoMenu -> viewTorrent
+    Sort   -> setSortKey
+
+pageDown :: EventM String AppState ()
+pageDown = undefined
+
+pageUp :: EventM String AppState ()
+pageUp = undefined
+
+viewTorrent :: EventM n AppState ()
+viewTorrent = undefined -- need to build single torrent view
+
+setSortKey :: EventM n AppState ()
+setSortKey = do
+  sk <- toEnum <$> gets menuCursor
+  curSk <- gets sortKey
+  reversed <- gets reverseSort
+  let reversed' = if sk == curSk then not reversed else reversed
+  torrents' <- sortTorrents curSk reversed' <$> gets T.torrents
+  modify (\s -> s{sortKey = sk, visibleMenu = NoMenu, reverseSort = reversed', T.torrents = torrents'})
+  pure ()
+
+selectOne :: EventM n AppState ()
+selectOne = do
+  vm <- gets visibleMenu
+  when (vm == NoMenu) $ do
+    selection <- gets selected
+    cursor <- gets mainCursor
+    toAdd <- fromJust . toId . (!! cursor) <$> gets T.torrents
+    let selection' = if toAdd `member` selection then delete toAdd selection
+                                                 else insert toAdd selection
+    modify (\s -> s{selected = selection'})
+
+selectAll :: EventM n AppState ()
+selectAll = do
+  vm <- gets visibleMenu
+  when (vm == NoMenu) $ do
+    allIds <- S.fromList . map (fromJust . toId) <$> gets T.torrents
+    modify (\s -> s{selected = allIds})
+
+selectNone :: EventM n AppState ()
+selectNone = do
+  vm <- gets visibleMenu
+  when (vm == NoMenu) $ do
+    modify (\s -> s{selected = mempty})
+
+selectUp :: EventM n AppState ()
+selectUp = do
+  vm  <- gets visibleMenu
+  when (vm == NoMenu) $ selectOne >> cursorUp
+
+selectDown :: EventM n AppState ()
+selectDown = do
+  vm <- gets visibleMenu
+  when (vm == NoMenu) $ selectOne >> cursorDown
+

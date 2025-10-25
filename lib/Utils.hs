@@ -7,9 +7,12 @@ module Utils
   , isRoot
   , replaceRoot
   , mkPathMap
+  , sortTorrents
   )
 where
+import qualified Constants                as C (labels)
 import           Control.Monad            (forM)
+import           Data.Function            (on)
 import           Data.List                (intersect, isPrefixOf, sortBy)
 import           Data.Maybe               (fromJust, isNothing)
 import           Effectful                (Eff, (:>))
@@ -18,10 +21,13 @@ import           Effectful.Unix           (Unix, fileID, isDirectory,
 import           System.FilePath.Posix    (joinPath, normalise,
                                            splitDirectories, (</>))
 import           System.Posix             (FileID)
-import           Transmission.RPC.Torrent (Torrent, downloadDir,
-                                           progress, files, fName, labels, name)
-import           Types                    (PathMap)
-import qualified Constants as C (labels)
+import           Transmission.RPC.Torrent (Torrent, addedDate, downloadDir,
+                                           downloadedEver, eta, fName, files,
+                                           labels, name, peersConnected,
+                                           percentComplete, progress,
+                                           rateDownload, rateUpload, ratio,
+                                           totalSize, uploadedEver, webseeds, toId)
+import           Types                    (PathMap, Sort (..))
 
 extractPrunable :: (Unix :> es) => [(FilePath, FilePath)] -> PathMap -> [Torrent] -> Eff es  [Torrent]
 extractPrunable arrs pathMap tors = do
@@ -68,3 +74,22 @@ buildFilesPath pathMap torrent = map (dir </>) fns
   where
     fns = map fName . fromJust . files $ torrent
     dir = pathMap . fromJust . downloadDir $ torrent
+
+sortTorrents :: Sort -> Bool -> [Torrent] -> [Torrent]
+sortTorrents sk reversed = rev . sortBy (key <> (compare `on` (fromJust . toId)))
+  where 
+    rev = if reversed  then reverse else id
+    key = case sk of
+                Name            -> compare `on` name
+                PercentComplete -> compare `on` percentComplete
+                Downloaded      -> compare `on` downloadedEver
+                DownloadSpeed   -> compare `on` rateDownload
+                Uploaded        -> compare `on` uploadedEver
+                UploadSpeed     -> compare `on` rateUpload
+                ETA             -> compare `on` eta
+                Ratio           -> compare `on` ratio
+                TotalSize       -> compare `on` totalSize
+                Peers           -> compare `on` peersConnected
+                Seeds           -> compare `on` length . webseeds
+                DateAdded       -> compare `on` addedDate
+                Labels          -> compare `on` labels
