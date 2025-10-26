@@ -6,11 +6,12 @@ where
 import           Brick                     (Padding (..), Widget, emptyWidget,
                                             fill, hLimit, hLimitPercent,
                                             padBottom, padLeft, padRight, str,
-                                            txt, vBox, vLimit, vLimitPercent,
-                                            (<+>), (<=>), withAttr)
+                                            txt, vBox, vLimit, withAttr, (<+>),
+                                            (<=>))
 import           Brick.Widgets.Border      (borderWithLabel, hBorder)
 import           Brick.Widgets.Core        (joinBorders)
 import           Brick.Widgets.ProgressBar (progressBar)
+import           Data.IntSet               (IntSet, member)
 import           Data.Maybe                (fromJust, fromMaybe, isNothing,
                                             mapMaybe)
 import           Data.Ratio                ((%))
@@ -29,32 +30,33 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
                                             addedDate, downloadedEver, eta,
                                             labels, name, peers, peersConnected,
                                             progress, rateDownload, rateUpload,
-                                            ratio, totalSize, uploadedEver,
-                                            webseeds, webseedsSendingToUs, toId)
+                                            ratio, toId, totalSize,
+                                            uploadedEver, webseeds,
+                                            webseedsSendingToUs)
+import           UI.Attrs                  (selectedAttr)
 import           UI.Types                  (AppState, Menu (NoMenu, Sort),
-                                            View (..), mainCursor, menuCursor,
-                                            session, sessionStats, view,
-                                            visibleMenu, selected)
+                                            View (..), mainCursor,
+                                            mainVisibleHeight, menuCursor,
+                                            selected, session, sessionStats,
+                                            view, visibleMenu, mainOffset)
 import           UI.Utils                  (highlightRow, sel)
-import Data.IntSet (IntSet, member)
-import UI.Attrs (selectedAttr)
 
 mkView :: AppState -> [Widget String]
 mkView s = pure .
   showMenu $ mainWidget
   where
     mainWidget
-      | view s == Prune = matchedView Prune (mainCursor s) (sel s) (session s) (sessionStats s) (selected s)
-      | otherwise = mainView (view s) (mainCursor s) (sel s) (session s) (sessionStats s) (selected s)
+      | view s == Prune = matchedView Prune (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) (mainVisibleHeight s) (mainOffset s)
+      | otherwise = mainView (view s) (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) (mainVisibleHeight s) (mainOffset s)
     showMenu = case visibleMenu s of
-                 NoMenu -> id
-                 Sort   -> (sortMenu (menuCursor s) <+>)
+                 NoMenu -> joinBorders
+                 Sort   -> \w -> joinBorders (sortMenu (menuCursor s) (mainVisibleHeight s) <+> w)
 
-mainTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String 
+mainTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String
 mainTorrentsView mc selection = foldr (<=>) emptyWidget . highlightRow mc . map (vLimit 1 . mainTorrentView selection)
 
 mainHeader :: Ord n => Widget n
-mainHeader = vLimit 1 (str "       " <+> hLimitPercent 30 (padRight Max $ str "Name")
+mainHeader = vLimit 1 (str "       " <+> hLimit 50 (padRight Max $ str "Name")
   <+> hLimit 16 (padRight Max $ str "Percent complete") <+> str "   "
   <+> hLimit 10 (padRight Max $ str "Downloaded") <+> str "   "
   <+> hLimit 16 (padRight Max $ str "Download speed") <+> str "   "
@@ -70,7 +72,7 @@ mainHeader = vLimit 1 (str "       " <+> hLimitPercent 30 (padRight Max $ str "N
 
 mainTorrentView :: Ord n => IntSet -> Torrent -> Widget n
 mainTorrentView selection torrent = select selection torrent $
-  hLimitPercent 30 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
+  hLimit 50 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
   <+> hLimit 16 (padLeft Max (percentView . fromMaybe 0 $ progress torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ downloadedEver torrent)) <+> str "   "
   <+> hLimit 14 (padLeft Max (sizeView . fromMaybe 0 $ rateDownload torrent) <+> str "/s")  <+> str "   "
@@ -79,25 +81,25 @@ mainTorrentView selection torrent = select selection torrent $
   <+> hLimit 8 (padLeft Max (etaView . fromMaybe NA $ eta torrent)) <+> str "   "
   <+> hLimit 5 (padLeft Max (ratioView  $ ratio torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ totalSize torrent)) <+> str "   "
-  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ peersConnected torrent) 
+  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ peersConnected torrent)
     (length . fromMaybe [] $ peers torrent))) <+> str "   "
-  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ webseedsSendingToUs torrent) 
+  <+> hLimit 10 (padLeft Max (peersView (fromMaybe 0 $ webseedsSendingToUs torrent)
     (length . fromMaybe [] $ webseeds torrent))) <+> str "   "
-  <+> hLimit 10 (padRight Max 
+  <+> hLimit 10 (padRight Max
     (str . iso8601Show . utctDay . fromMaybe (posixSecondsToUTCTime 0) $ addedDate torrent)) <+> str "   "
   <+> hLimit 20 (padRight Max (txt . T.intercalate " " . fromMaybe [] $ labels torrent))
 
 select :: Ord n => IntSet -> Torrent -> Widget n -> Widget n
 select selection torrent
-      | fromJust (toId torrent) `member` selection = 
+      | fromJust (toId torrent) `member` selection =
         \w ->hLimit 3 (str "[*]") <+> str "   " <+> withAttr selectedAttr w
       | otherwise = \w -> hLimit 3 (str "[ ]") <+> str "   " <+> w
 
-matchedTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String 
+matchedTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String
 matchedTorrentsView mainCounter selection = foldr (<=>) emptyWidget . highlightRow mainCounter . map (vLimit 1 . matchedTorrentView selection)
 
 matchedHeader :: Ord n => Widget n
-matchedHeader = vLimit 1 (str "       " <+> hLimitPercent 30 (padRight Max $ str "Name")
+matchedHeader = vLimit 1 (str "       " <+> hLimit 50 (padRight Max $ str "Name")
   <+> hLimit 10 (padRight Max $ str "Downloaded") <+> str "   "
   <+> hLimit 10 (padRight Max $ str "Uploaded") <+> str "   "
   <+> hLimit 16 (padRight Max $ str "Upload speed") <+> str "   "
@@ -110,7 +112,7 @@ matchedHeader = vLimit 1 (str "       " <+> hLimitPercent 30 (padRight Max $ str
 
 matchedTorrentView :: Ord n => IntSet -> Torrent -> Widget n
 matchedTorrentView selection torrent = select selection torrent $
-  hLimitPercent 30 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
+  hLimit 50 (padRight Max (txt . fromMaybe "" $ name torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ downloadedEver torrent)) <+> str "   "
   <+> hLimit 10 (padLeft Max (sizeView . fromMaybe 0 $ uploadedEver torrent)) <+> str "   "
   <+> hLimit 14 (padLeft Max (sizeView . fromMaybe 0 $ rateUpload torrent) <+> str "/s") <+> str "   "
@@ -194,18 +196,21 @@ limitView :: Ord n => Bool -> Int -> Widget n
 limitView False _ = str "∞ "
 limitView _ lim   = sizeView lim <+> str "/s "
 
-mainView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Widget String
-mainView v mc torrents sesh seshStats selection = joinBorders . borderWithLabel (str . show $ v) $ mainHeader <=> hBorder
-  <=> (vLimitPercent 90 . mainTorrentsView mc selection $ torrents)
+mainView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Int -> Int -> Widget String
+mainView v mc torrents sesh seshStats selection visibleHeight offset =
+      borderWithLabel (str . show $ v) $ mainHeader <=> hBorder
+  <=> (vLimit visibleHeight . mainTorrentsView mc selection . take visibleHeight . drop offset $ torrents)
   <=> hBorder <=> vLimit 1 (sessionView sesh seshStats)
 
-matchedView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Widget String
-matchedView v mc torrents sesh seshStats selection = joinBorders . borderWithLabel (str . show $ v) $ matchedHeader
-  <=> hBorder <=> (vLimitPercent 90 . matchedTorrentsView mc selection $ torrents)
+matchedView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Int -> Int -> Widget String
+matchedView v mc torrents sesh seshStats selection visibleHeight offset =
+      joinBorders . borderWithLabel (str . show $ v) $ matchedHeader
+  <=> hBorder <=> (vLimit visibleHeight . matchedTorrentsView mc selection . take visibleHeight. drop offset $ torrents)
   <=> hBorder <=> vLimit 1 (torrentData torrents <+> sessionView sesh seshStats)
 
-sortMenu :: Int -> Widget n
-sortMenu mc = joinBorders . borderWithLabel (str "Sort by") . vLimitPercent 90 . padBottom Max
-  . hLimitPercent 10 . padRight Max . vBox .highlightRow mc $ [str "Name", str "Percent complete"
+sortMenu :: Int -> Int -> Widget n
+sortMenu mc vh = (vLimit 2 . padBottom Max . hLimitPercent 10 . padRight Max . str $ " ")
+  <=> (borderWithLabel (str "Sort by") . vLimit vh . padBottom Max
+  . hLimit 20 . padRight Max . vBox . highlightRow mc $ [str "Name", str "Percent complete"
   , str "Downloaded", str "Download speed", str "Uploaded", str "Upload speed", str "ETA", str "Ratio"
-  , str "Total size", str "Peers", str "Seeds", str "Date added", str "Labels"]
+  , str "Total size", str "Peers", str "Seeds", str "Date added", str "Labels"])

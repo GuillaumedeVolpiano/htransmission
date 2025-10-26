@@ -9,51 +9,65 @@ module UI.Events (
                  , pageDown
                  , pageUp
                  , removeTorrent
+                 , reverseSort
                  , selectOne
                  , selectAll
                  , selectNone
                  , selectUp
                  , selectDown
+                 , appStartEvent
                  )
 where
 
 import           Brick                    (BrickEvent (AppEvent, VtyEvent),
-                                           EventM, get, gets, modify, put)
+                                           EventM, continueWithoutRedraw, get,
+                                           getVtyHandle, gets, modify, put)
 import           Brick.Keybindings        (handleKey)
-import           Brick.Main               (continueWithoutRedraw)
-import           Control.Monad            (void, when, unless)
+import           Control.Monad            (unless, void, when)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import           Data.IntSet              (delete, insert, member)
+import qualified Data.IntSet              as S (fromList, toList)
 import           Data.Maybe               (fromJust)
 import           Effectful                (runEff)
 import           Effectful.Client         (enqueueShared)
 import           Effectful.Concurrent.STM (atomically, runConcurrent)
-import           Graphics.Vty             (Event (EvKey))
+import           Graphics.Vty             (Event (EvKey, EvResize),
+                                           displayBounds, outputIface)
 import           Transmission.RPC.Torrent (toId)
-import qualified UI.Types                 as T (keyHandler, queue, session,
-                                                sessionStats, torrents, view)
-import           UI.Types                 (AppState,
-                                           Events (..), Menu (NoMenu, Sort),
-                                           View, mainCursor, menuCursor,
-                                           reverseSort, selected, sortKey, visibleMenu)
+import           Types                    (Req (Delete, Get))
+import qualified UI.Types                 as T (keyHandler, queue, reverseSort,
+                                                session, sessionStats, torrents,
+                                                view)
+import           UI.Types                 (AppState, Events (..),
+                                           Menu (NoMenu, Sort), View,
+                                           mainCursor, mainOffset,
+                                           mainVisibleHeight, menuCursor,
+                                           selected, sortKey, visibleMenu)
 import           UI.Utils                 (actionFromView, sel)
-import qualified Data.IntSet as S (fromList, toList)
-import Types (Req(Get, Delete))
+import           Utils                    (sortTorrents)
 
-import Utils (sortTorrents)
+appStartEvent :: EventM String AppState ()
+appStartEvent = do
+  vty <- getVtyHandle
+  (_, height) <- liftIO $ displayBounds . outputIface $ vty
+  modify (\s -> s{mainVisibleHeight = height - 6})
+  updateView True
 
 eventHandler :: BrickEvent String Events -> EventM String AppState ()
 eventHandler (AppEvent Tick) = updateView False >> continueWithoutRedraw
 eventHandler (AppEvent (Updated isSwitching view torrents sesh seshStats)) =
-  if isSwitching then modify (\a -> a{T.view = view, T.torrents = sortTorrents (sortKey a) (reverseSort a) torrents, T.session = sesh
+  if isSwitching then modify (\a -> a{T.view = view, T.torrents = sortTorrents (sortKey a) (T.reverseSort a) torrents, T.session = sesh
     , T.sessionStats = seshStats})
   else do
     curView <- gets T.view
     if actionFromView view == actionFromView curView then
-                                         modify (\a -> a{T.torrents = sortTorrents (sortKey a) (reverseSort a) torrents, T.session = sesh
+                                         modify (\a -> a{T.torrents = sortTorrents (sortKey a) (T.reverseSort a) torrents, T.session = sesh
                                            , T.sessionStats = seshStats})
                                          else continueWithoutRedraw
 eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
+eventHandler (VtyEvent (EvResize _ newHeight)) = do
+  modify (\s -> s{mainVisibleHeight = newHeight - 6, mainCursor = min (mainCursor s) (newHeight -1)})
+  updateView False
 eventHandler _ = pure ()
 
 updateView :: Bool -> EventM n AppState ()
@@ -66,14 +80,14 @@ updateView isSwitching = do
 switchView :: View -> EventM n AppState ()
 switchView view = modify (\a -> a{T.view=view}) >> updateView True >> continueWithoutRedraw
 
-menuOnOff :: Menu -> EventM n AppState ()
+menuOnOff :: Menu -> EventM n AppState ()
 menuOnOff menu = do
   curMenu <- gets visibleMenu
   let menu' = if curMenu == menu then NoMenu else menu
   modify (\s -> s{visibleMenu = menu', menuCursor = 0})
 
 
-cursorDown :: EventM n AppState ()
+cursorDown :: EventM n AppState ()
 cursorDown = do
   vm <- gets visibleMenu
   if vm  == NoMenu then cursorDownMain else cursorDownMenu
@@ -83,10 +97,13 @@ cursorDownMain = do
   s <- get
   let cursor = mainCursor s
       tors = sel s
-      cursor' = min (cursor + 1) (length tors - 1)
-  put s {mainCursor = cursor'}
+      offset = mainOffset s
+      height = mainVisibleHeight s
+      cursor' = if cursor == height - 1 || cursor + offset == length tors - 1 then cursor else cursor + 1
+      offset' = if cursor == height - 1 then offset + 1 else offset
+  put s {mainCursor = cursor', mainOffset = offset'}
 
-cursorDownMenu :: EventM n AppState ()
+cursorDownMenu :: EventM n AppState ()
 cursorDownMenu = do
   menu <- gets visibleMenu
   cursor <- gets menuCursor
@@ -96,7 +113,7 @@ cursorDownMenu = do
       cursor' = min (cursor + 1) menuSize
   modify (\s -> s {menuCursor = cursor'})
 
-cursorUp :: EventM n AppState ()
+cursorUp :: EventM n AppState ()
 cursorUp = do
   vm <- gets visibleMenu
   if vm == NoMenu then cursorUpMain else cursorUpMenu
@@ -104,16 +121,18 @@ cursorUp = do
 cursorUpMain :: EventM n AppState ()
 cursorUpMain = do
   cursor <- gets mainCursor
-  let cursor' = max (cursor - 1) 0
-  modify (\s -> s {mainCursor = cursor'})
+  offset <- gets mainOffset
+  let cursor' = if cursor == 0 then cursor else cursor -1
+      offset' = if cursor == 0 then max (offset - 1) 0 else offset
+  modify (\s -> s {mainCursor = cursor', mainOffset = offset'})
 
-cursorUpMenu :: EventM n AppState ()
+cursorUpMenu :: EventM n AppState ()
 cursorUpMenu = do
   cursor <- gets menuCursor
   let cursor' = max (cursor - 1) 0
   modify (\s -> s{menuCursor = cursor'})
 
-cursorTrigger :: EventM n AppState ()
+cursorTrigger :: EventM n AppState ()
 cursorTrigger = do
   vm <- gets visibleMenu
   case vm of
@@ -121,43 +140,60 @@ cursorTrigger = do
     Sort   -> setSortKey
 
 pageDown :: EventM String AppState ()
-pageDown = undefined
+pageDown = do
+  offset <- gets mainOffset
+  vSize <- gets mainVisibleHeight
+  maxVal <- (-1 +) . length <$> gets T.torrents
+  let offset' = min (offset + vSize) maxVal
+  modify (\s -> s { mainCursor = 0, mainOffset = offset'})
 
 pageUp :: EventM String AppState ()
-pageUp = undefined
+pageUp = do
+  offset <- gets mainOffset
+  vSize <- gets mainVisibleHeight
+  let offset' = max (offset - vSize) 0
+  modify (\s -> s {mainCursor = 0, mainOffset = offset'})
 
-viewTorrent :: EventM n AppState ()
+viewTorrent :: EventM n AppState ()
 viewTorrent = undefined -- need to build single torrent view
 
 setSortKey :: EventM n AppState ()
 setSortKey = do
   sk <- toEnum <$> gets menuCursor
   curSk <- gets sortKey
-  reversed <- gets reverseSort
+  reversed <- gets T.reverseSort
   let reversed' = if sk == curSk then not reversed else reversed
   torrents' <- sortTorrents curSk reversed' <$> gets T.torrents
-  modify (\s -> s{sortKey = sk, visibleMenu = NoMenu, reverseSort = reversed', T.torrents = torrents'})
-  pure ()
+  modify (\s -> s{sortKey = sk, visibleMenu = NoMenu, T.reverseSort = reversed', T.torrents = torrents'})
 
-selectOne :: EventM n AppState ()
+reverseSort :: EventM n AppState ()
+reverseSort = do
+  reversed <- gets T.reverseSort
+  sk <- gets sortKey
+  torrents' <- sortTorrents sk (not reversed) <$> gets T.torrents
+  modify (\s -> s{T.reverseSort = not reversed, T.torrents = torrents'})
+
+
+selectOne :: EventM n AppState ()
 selectOne = do
   vm <- gets visibleMenu
   when (vm == NoMenu) $ do
     selection <- gets selected
     cursor <- gets mainCursor
-    toAdd <- fromJust . toId . (!! cursor) <$> gets T.torrents
+    offset <- gets mainOffset
+    toAdd <- fromJust . toId . (!! (cursor + offset)) <$> gets T.torrents
     let selection' = if toAdd `member` selection then delete toAdd selection
                                                  else insert toAdd selection
     modify (\s -> s{selected = selection'})
 
-selectAll :: EventM n AppState ()
+selectAll :: EventM n AppState ()
 selectAll = do
   vm <- gets visibleMenu
   when (vm == NoMenu) $ do
     allIds <- S.fromList . map (fromJust . toId) <$> gets T.torrents
     modify (\s -> s{selected = allIds})
 
-selectNone :: EventM n AppState ()
+selectNone :: EventM n AppState ()
 selectNone = do
   vm <- gets visibleMenu
   when (vm == NoMenu) $ do
@@ -168,7 +204,7 @@ selectUp = do
   vm  <- gets visibleMenu
   when (vm == NoMenu) $ selectOne >> cursorUp
 
-selectDown :: EventM n AppState ()
+selectDown :: EventM n AppState ()
 selectDown = do
   vm <- gets visibleMenu
   when (vm == NoMenu) $ selectOne >> cursorDown

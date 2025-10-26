@@ -23,7 +23,7 @@ import           Graphics.Vty                    (Key (KChar, KDown, KFun, KUp, 
 import           UI.Events                       (cursorDown, cursorUp,
                                                   menuOnOff, switchView, cursorTrigger,
                                                   pageUp, pageDown, selectOne, selectAll,
-                                                  selectNone, selectUp, selectDown, removeTorrent)
+                                                  selectNone, selectUp, selectDown, removeTorrent, reverseSort)
 import           UI.Types                        (AppState, KeyEvent (..),
                                                   Menu (Sort), View (..))
 
@@ -39,6 +39,7 @@ allKeyEvents = keyEvents [
                           ("error view", ErrorViewEvent),
                           ("unreferenced view", PruneViewEvent),
                           ("display sort menu", SortMenuEvent),
+                          ("reverse sort order", ReverseSortEvent),
                           ("close menu", CloseMenuEvent),
                           ("move cursor down", CursorDownEvent),
                           ("move cursor up", CursorUpEvent),
@@ -66,6 +67,7 @@ defaultBindings = [
                    (ErrorViewEvent, [ctrl 'e']),
                    (PruneViewEvent, [ctrl 'u']),
                    (SortMenuEvent, [bind (KFun 7)]),
+                   (ReverseSortEvent, [bind (KChar 'r')]),
                    (CursorDownEvent, [bind KDown]),
                    (CursorUpEvent, [bind KUp]),
                    (CursorTriggerEvent, [bind KEnter]),
@@ -95,6 +97,7 @@ handlers = [
             onEvent ErrorViewEvent "Switch to the error view" (switchView Error),
             onEvent PruneViewEvent "Switch to the unreferenced view" (switchView Prune),
             onEvent SortMenuEvent "Display the sort menu" (menuOnOff Sort),
+            onEvent ReverseSortEvent "Reverse the sort order" reverseSort,
             onEvent CursorDownEvent "Move the cursor down" cursorDown,
             onEvent CursorUpEvent "Move the cursor up" cursorUp,
             onEvent CursorTriggerEvent "Trigger the cursor action" cursorTrigger,

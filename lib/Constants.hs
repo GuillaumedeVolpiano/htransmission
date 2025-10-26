@@ -5,8 +5,7 @@ module Constants (
   basicSession,
   arrPaths,
   labels,
-  pathMap,
-  mainViewportName
+  pathMap
   )
 where
 
@@ -43,6 +42,3 @@ pathMap = [
   ("/var/lib/rtorrent/adult_uploads", "/opt/restricted/uploads"),
   ("/var/lib/rtorrent/downloads/whisparr", "/opt/restricted/downloads")
                         ]
-
-mainViewportName :: String
-mainViewportName = "main viewport"

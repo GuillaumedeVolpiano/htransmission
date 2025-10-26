@@ -16,6 +16,9 @@ module UI.Types (View(..),
                 sortKey,
                 reverseSort,
                 selected,
+                mainOffset,
+                mainVisibleHeight,
+                mainContentHeight,
                 Menu(..),
                 newState
   )
@@ -33,29 +36,31 @@ import           Types                           (FIFOSet, Sort (Name), Req)
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Prune deriving (Eq, Ord, Show)
 
-data KeyEvent = QuitEvent
-              | MainViewEvent
-              | DownloadingViewEvent
-              | SeedingViewEvent
+data KeyEvent = 
+                CloseMenuEvent
               | CompleteViewEvent
-              | PausedViewEvent
-              | InactiveViewEvent
-              | ErrorViewEvent
-              | PruneViewEvent
-              | SortMenuEvent
-              | CloseMenuEvent
               | CursorDownEvent
               | CursorUpEvent
               | CursorTriggerEvent
+              | DownloadingViewEvent
+              | ErrorViewEvent
+              | InactiveViewEvent
+              | MainViewEvent
               | PageUpEvent
               | PageDownEvent
+              | PausedViewEvent
+              | PruneViewEvent
+              | QuitEvent
+              | RemoveSelectedEvent
+              | RemoveSelectedWithDataEvent
+              | ReverseSortEvent
+              | SeedingViewEvent
               | SelectEvent
               | SelectAllEvent
               | SelectNoneEvent
               | SelectUpEvent
               | SelectDownEvent
-              | RemoveSelectedEvent
-              | RemoveSelectedWithDataEvent
+              | SortMenuEvent
             deriving (Eq, Ord)
 
 data AppState where
@@ -72,7 +77,10 @@ data AppState where
                mainCursor :: Int,
                sortKey :: Sort,
                reverseSort :: Bool,
-               selected :: IntSet
+               selected :: IntSet,
+               mainOffset :: Int,
+               mainVisibleHeight :: Int,
+               mainContentHeight :: Int
                } ->
                 AppState
 
@@ -84,4 +92,4 @@ data Menu = NoMenu | Sort deriving Eq
 
 
 newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> TVar (FIFOSet (Bool, View, Req)) -> AppState
-newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher q NoMenu 0 0 Name False mempty
+newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher q NoMenu 0 0 Name False mempty 0 0 0
