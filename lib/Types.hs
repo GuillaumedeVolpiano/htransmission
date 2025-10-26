@@ -9,12 +9,14 @@ module Types
   dequeue,
   newFIFOSet,
   Action(..),
-  Sort(..)
+  Sort(..),
+  Req(..)
   )
 where
 import           Data.Sequence (Seq ((:|>)), ViewL (EmptyL, (:<)), viewl)
 import           Data.Set      (Set, delete, insert, member)
 import           Prelude       hiding (log)
+import Transmission.RPC.Types (Label)
 
 data Action = Global | Matched deriving (Eq, Ord)
 
@@ -28,6 +30,8 @@ data FIFOSet a where
 
 data Sort = Name | PercentComplete | Downloaded | DownloadSpeed | Uploaded | UploadSpeed | ETA | Ratio | TotalSize
   | Peers | Seeds | DateAdded | Labels deriving (Enum, Eq)
+
+data Req = Get | Delete ([Int], Bool) | Add [(FilePath, FilePath, [Label])] deriving (Eq, Ord)
 
 enqueue :: Ord a => a -> FIFOSet a -> FIFOSet a
 enqueue x f@(FIFOSet q s)

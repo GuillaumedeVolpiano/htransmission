@@ -8,6 +8,7 @@ module UI.Events (
                  , cursorTrigger
                  , pageDown
                  , pageUp
+                 , removeTorrent
                  , selectOne
                  , selectAll
                  , selectNone
@@ -20,7 +21,7 @@ import           Brick                    (BrickEvent (AppEvent, VtyEvent),
                                            EventM, get, gets, modify, put)
 import           Brick.Keybindings        (handleKey)
 import           Brick.Main               (continueWithoutRedraw)
-import           Control.Monad            (void, when)
+import           Control.Monad            (void, when, unless)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import           Data.IntSet              (delete, insert, member)
 import           Data.Maybe               (fromJust)
@@ -36,7 +37,8 @@ import           UI.Types                 (AppState,
                                            View, mainCursor, menuCursor,
                                            reverseSort, selected, sortKey, visibleMenu)
 import           UI.Utils                 (actionFromView, sel)
-import qualified Data.IntSet as S (fromList)
+import qualified Data.IntSet as S (fromList, toList)
+import Types (Req(Get, Delete))
 
 import Utils (sortTorrents)
 
@@ -59,7 +61,7 @@ updateView isSwitching = do
   view <- gets T.view
   fifoVar <- gets T.queue
   liftIO $ runEff . runConcurrent . atomically $ do
-    enqueueShared (isSwitching, view) fifoVar
+    enqueueShared (isSwitching, view, Get) fifoVar
 
 switchView :: View -> EventM n AppState ()
 switchView view = modify (\a -> a{T.view=view}) >> updateView True >> continueWithoutRedraw
@@ -171,3 +173,11 @@ selectDown = do
   vm <- gets visibleMenu
   when (vm == NoMenu) $ selectOne >> cursorDown
 
+removeTorrent :: Bool -> EventM n AppState ()
+removeTorrent removeData = do
+  view <- gets T.view
+  fifoVar <- gets T.queue
+  toRemove <- S.toList <$> gets selected
+  unless (null toRemove) $ -- need to report if selection is empty, need failsafe
+    liftIO $ runEff . runConcurrent . atomically $ do
+      enqueueShared (False, view, Delete (toRemove, removeData)) fifoVar

@@ -12,6 +12,7 @@ import           Effectful                  (runEff)
 import           Effectful.Client           (startClient)
 import           Effectful.Concurrent       (runConcurrent)
 import           Effectful.Concurrent.STM   (newTVarIO)
+import Effectful.FileSystem (runFileSystem)
 import           Effectful.Log              (LogLevel (LogTrace), runLog)
 import           Effectful.Prim.IORef       (runPrim)
 import           Effectful.Reader.Static    (runReader)
@@ -51,7 +52,7 @@ main = do
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
   (eventLog, _) <- withSimpleTextLogger $ \stl -> runEff .runConcurrent . runReader client . runWreq
-    . runPrim . runLog "Client" stl LogTrace . runTime . runUnix $ startClient queue chan
+    . runPrim . runLog "Client" stl LogTrace . runTime . runUnix . runFileSystem $ startClient queue chan
   let appState = newState keyConfig dispatcher queue
   void $ customMain vty (mkVty defaultConfig) (Just chan) app appState
   T.putStrLn eventLog

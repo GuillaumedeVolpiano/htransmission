@@ -29,7 +29,7 @@ import           Transmission.RPC.Session        (Session, SessionStats,
                                                   emptySession,
                                                   emptySessionStats)
 import           Transmission.RPC.Torrent        (Torrent)
-import           Types                           (FIFOSet, Sort (Name))
+import           Types                           (FIFOSet, Sort (Name), Req)
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Prune deriving (Eq, Ord, Show)
 
@@ -54,6 +54,8 @@ data KeyEvent = QuitEvent
               | SelectNoneEvent
               | SelectUpEvent
               | SelectDownEvent
+              | RemoveSelectedEvent
+              | RemoveSelectedWithDataEvent
             deriving (Eq, Ord)
 
 data AppState where
@@ -64,7 +66,7 @@ data AppState where
                sessionStats :: SessionStats,
                keyBindings :: KeyConfig KeyEvent,
                keyHandler :: KeyDispatcher KeyEvent (EventM String AppState),
-               queue :: TVar (FIFOSet (Bool,View)),
+               queue :: TVar (FIFOSet (Bool,View, Req)),
                visibleMenu :: Menu,
                menuCursor :: Int,
                mainCursor :: Int,
@@ -81,5 +83,5 @@ data Events where
 data Menu = NoMenu | Sort deriving Eq
 
 
-newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> TVar (FIFOSet (Bool, View)) -> AppState
+newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> TVar (FIFOSet (Bool, View, Req)) -> AppState
 newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher q NoMenu 0 0 Name False mempty
