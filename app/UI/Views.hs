@@ -10,6 +10,7 @@ import           Brick                     (Padding (..), Widget, emptyWidget,
                                             (<=>))
 import           Brick.Widgets.Border      (borderWithLabel, hBorder)
 import           Brick.Widgets.Core        (joinBorders)
+import           Brick.Widgets.Dialog      (renderDialog)
 import           Brick.Widgets.ProgressBar (progressBar)
 import           Data.IntSet               (IntSet, member)
 import           Data.Maybe                (fromJust, fromMaybe, isNothing,
@@ -35,22 +36,26 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
                                             webseedsSendingToUs)
 import           UI.Attrs                  (selectedAttr)
 import           UI.Types                  (AppState, Menu (NoMenu, Sort),
-                                            View (..), mainCursor,
+                                            View (..), mainCursor, mainOffset,
                                             mainVisibleHeight, menuCursor,
                                             selected, session, sessionStats,
-                                            view, visibleMenu, mainOffset)
+                                            view, visibleMenu, visibleDialog)
 import           UI.Utils                  (highlightRow, sel)
 
 mkView :: AppState -> [Widget String]
 mkView s = pure .
-  showMenu $ mainWidget
+  showDialog . showMenu $ mainWidget
   where
     mainWidget
-      | view s == Prune = matchedView Prune (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) (mainVisibleHeight s) (mainOffset s)
-      | otherwise = mainView (view s) (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) (mainVisibleHeight s) (mainOffset s)
+      | view s == Prune = matchedView Prune (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) vh 
+        (mainOffset s)
+      | otherwise = mainView (view s) (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) vh 
+        (mainOffset s)
     showMenu = case visibleMenu s of
                  NoMenu -> joinBorders
                  Sort   -> \w -> joinBorders (sortMenu (menuCursor s) (mainVisibleHeight s) <+> w)
+    showDialog = maybe id renderDialog . visibleDialog $ s
+    vh = if isNothing (visibleDialog s) then mainVisibleHeight s else mainVisibleHeight s - 3
 
 mainTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String
 mainTorrentsView mc selection = foldr (<=>) emptyWidget . highlightRow mc . map (vLimit 1 . mainTorrentView selection)

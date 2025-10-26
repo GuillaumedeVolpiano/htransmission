@@ -2,12 +2,14 @@ module UI.Utils
   (sel
   , actionFromView
   , appChooseCursor
-  , highlightRow)
+  , highlightRow
+  , mkDialog)
 where
 
 import           Brick                    (CursorLocation (CursorLocation, cursorLocation, cursorLocationName, cursorLocationVisible),
-                                           Location (Location), Widget,
-                                           withAttr)
+                                           Location (Location), Widget, txt,
+                                           withAttr, str)
+import           Brick.Widgets.Dialog     (Dialog, dialog)
 import           Data.Maybe               (fromMaybe)
 import           Transmission.RPC.Torrent (Torrent, errorCode, progress,
                                            rateDownload, rateUpload, status)
@@ -15,11 +17,12 @@ import qualified Transmission.RPC.Types   as TT (Error (OK),
                                                  Status (Downloading, Seeding, Stopped))
 import           Types                    (Action (Global, Matched))
 import           UI.Attrs                 (cursorAttr)
-import           UI.Types                 (AppState, Menu (NoMenu),
+import           UI.Types                 (AppState, DialogContent (Alert, Remove),
+                                           Menu (NoMenu),
                                            View (Complete, Downloading, Error, Inactive, Main, Paused, Prune, Seeding),
-                                           mainCursor, menuCursor, torrents,
-                                           view, visibleMenu, sortKey, reverseSort)
-import Utils (sortTorrents)
+                                           mainCursor, menuCursor, reverseSort,
+                                           sortKey, torrents, view, visibleMenu)
+import           Utils                    (sortTorrents)
 
 sel :: AppState -> [Torrent]
 sel state = sortTorrents (sortKey state) (reverseSort state). filter selector . torrents $ state
@@ -55,3 +58,9 @@ highlightRow cursor = zipWith (\ i w -> (if i == cursor then highlight w else w)
 
 highlight :: Widget n -> Widget n
 highlight = withAttr cursorAttr
+
+mkDialog :: DialogContent -> Int -> Dialog (Maybe DialogContent) String
+mkDialog (Alert text) = dialog (Just . txt $ text) (Just ("OK", [("OK", "0", Nothing)]))
+mkDialog r@(Remove (t, _)) = dialog 
+  (Just . str $ "Are you sure you want to remove " ++ show (length t) ++ " selected torrents")
+  (Just ("0", [("No", "0", Nothing), ("Yes", "1", Just r)]))

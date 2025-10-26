@@ -23,7 +23,7 @@ import           Graphics.Vty                    (Key (KChar, KDown, KFun, KUp, 
 import           UI.Events                       (cursorDown, cursorUp,
                                                   menuOnOff, switchView, cursorTrigger,
                                                   pageUp, pageDown, selectOne, selectAll,
-                                                  selectNone, selectUp, selectDown, removeTorrent, reverseSort)
+                                                  selectNone, selectUp, selectDown, removeTorrent, reverseSort, tabSwitch)
 import           UI.Types                        (AppState, KeyEvent (..),
                                                   Menu (Sort), View (..))
 
@@ -52,7 +52,8 @@ allKeyEvents = keyEvents [
                           ("select multiple, upwards", SelectUpEvent),
                           ("select multiple, downwards", SelectDownEvent),
                           ("remove the selected torrents", RemoveSelectedEvent),
-                          ("remove the selected torrents and their data", RemoveSelectedWithDataEvent)
+                          ("remove the selected torrents and their data", RemoveSelectedWithDataEvent),
+                          ("switch the focused button", TabSwitchEvent)
                          ]
 
 defaultBindings :: [(KeyEvent, [Binding])]
@@ -78,8 +79,9 @@ defaultBindings = [
                    (SelectNoneEvent, [ctrl 'd']),
                    (SelectUpEvent, [shift KUp]),
                    (SelectDownEvent, [shift KDown]),
-                   (RemoveSelectedEvent, [ctrl '-']), -- switch to '-' and ctrl '-' once confirmation integrated
-                   (RemoveSelectedWithDataEvent, [meta '-'])
+                   (RemoveSelectedEvent, [bind (KChar '-')]), -- switch to '-' and ctrl '-' once confirmation integrated
+                   (RemoveSelectedWithDataEvent, [meta '-']),
+                   (TabSwitchEvent, [bind (KChar '\t')])
                   ]
 
 keyConfig :: KeyConfig KeyEvent
@@ -109,7 +111,8 @@ handlers = [
             onEvent SelectUpEvent "Toggle multiple selections, upwards" selectUp,
             onEvent SelectDownEvent "Toggle multiple selections, downwards" selectDown,
             onEvent RemoveSelectedEvent "Remove selected torrents" (removeTorrent False),
-            onEvent RemoveSelectedWithDataEvent "Remove selected torrents and their data" (removeTorrent True)
+            onEvent RemoveSelectedWithDataEvent "Remove selected torrents and their data" (removeTorrent True),
+            onEvent TabSwitchEvent "Switch selected button" tabSwitch
            ]
 
 dispatcher :: KeyDispatcher KeyEvent (EventM String AppState)

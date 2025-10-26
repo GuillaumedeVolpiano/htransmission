@@ -18,25 +18,30 @@ module UI.Types (View(..),
                 selected,
                 mainOffset,
                 mainVisibleHeight,
+                visibleWidth,
                 mainContentHeight,
+                visibleDialog,
                 Menu(..),
-                newState
+                newState,
+                DialogContent (..)
   )
 where
 import           Brick                           (EventM)
 import           Brick.Keybindings               (KeyConfig)
 import           Brick.Keybindings.KeyDispatcher (KeyDispatcher)
+import           Brick.Widgets.Dialog            (Dialog)
 import           Data.IntSet                     (IntSet)
+import           Data.Text
 import           Effectful.Concurrent.STM        (TVar)
 import           Transmission.RPC.Session        (Session, SessionStats,
                                                   emptySession,
                                                   emptySessionStats)
 import           Transmission.RPC.Torrent        (Torrent)
-import           Types                           (FIFOSet, Sort (Name), Req)
+import           Types                           (FIFOSet, Req, Sort (Name))
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Prune deriving (Eq, Ord, Show)
 
-data KeyEvent = 
+data KeyEvent =
                 CloseMenuEvent
               | CompleteViewEvent
               | CursorDownEvent
@@ -49,6 +54,7 @@ data KeyEvent =
               | PageUpEvent
               | PageDownEvent
               | PausedViewEvent
+
               | PruneViewEvent
               | QuitEvent
               | RemoveSelectedEvent
@@ -61,6 +67,7 @@ data KeyEvent =
               | SelectUpEvent
               | SelectDownEvent
               | SortMenuEvent
+              | TabSwitchEvent
             deriving (Eq, Ord)
 
 data AppState where
@@ -80,7 +87,9 @@ data AppState where
                selected :: IntSet,
                mainOffset :: Int,
                mainVisibleHeight :: Int,
-               mainContentHeight :: Int
+               visibleWidth :: Int,
+               mainContentHeight :: Int,
+               visibleDialog :: Maybe (Dialog (Maybe DialogContent) String)
                } ->
                 AppState
 
@@ -90,6 +99,9 @@ data Events where
 
 data Menu = NoMenu | Sort deriving Eq
 
+data DialogContent = Alert Text | Remove ([Int], Bool)
+
 
 newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> TVar (FIFOSet (Bool, View, Req)) -> AppState
-newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher q NoMenu 0 0 Name False mempty 0 0 0
+newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
+  q NoMenu 0 0 Name False mempty 0 0 0 0 Nothing

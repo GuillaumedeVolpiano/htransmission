@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module UI.Events (
                    eventHandler
                  , updateView
@@ -16,6 +17,7 @@ module UI.Events (
                  , selectUp
                  , selectDown
                  , appStartEvent
+                 , tabSwitch
                  )
 where
 
@@ -23,7 +25,7 @@ import           Brick                    (BrickEvent (AppEvent, VtyEvent),
                                            EventM, continueWithoutRedraw, get,
                                            getVtyHandle, gets, modify, put)
 import           Brick.Keybindings        (handleKey)
-import           Control.Monad            (unless, void, when)
+import           Control.Monad            (void, when)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import           Data.IntSet              (delete, insert, member)
 import qualified Data.IntSet              as S (fromList, toList)
@@ -38,19 +40,20 @@ import           Types                    (Req (Delete, Get))
 import qualified UI.Types                 as T (keyHandler, queue, reverseSort,
                                                 session, sessionStats, torrents,
                                                 view)
-import           UI.Types                 (AppState, Events (..),
+import           UI.Types                 (AppState (visibleDialog), Events (..),
                                            Menu (NoMenu, Sort), View,
                                            mainCursor, mainOffset,
                                            mainVisibleHeight, menuCursor,
-                                           selected, sortKey, visibleMenu)
-import           UI.Utils                 (actionFromView, sel)
+                                           selected, sortKey, visibleMenu, visibleWidth, DialogContent (Alert, Remove))
+import           UI.Utils                 (actionFromView, sel, mkDialog)
 import           Utils                    (sortTorrents)
+import Brick.Widgets.Dialog (dialogSelection, dialogButtons, getDialogFocus, setDialogFocus)
 
 appStartEvent :: EventM String AppState ()
 appStartEvent = do
   vty <- getVtyHandle
-  (_, height) <- liftIO $ displayBounds . outputIface $ vty
-  modify (\s -> s{mainVisibleHeight = height - 6})
+  (width, height) <- liftIO $ displayBounds . outputIface $ vty
+  modify (\s -> s{mainVisibleHeight = height - 6, visibleWidth = width})
   updateView True
 
 eventHandler :: BrickEvent String Events -> EventM String AppState ()
@@ -65,8 +68,9 @@ eventHandler (AppEvent (Updated isSwitching view torrents sesh seshStats)) =
                                            , T.sessionStats = seshStats})
                                          else continueWithoutRedraw
 eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
-eventHandler (VtyEvent (EvResize _ newHeight)) = do
-  modify (\s -> s{mainVisibleHeight = newHeight - 6, mainCursor = min (mainCursor s) (newHeight -1)})
+eventHandler (VtyEvent (EvResize newWidth newHeight)) = do
+  modify (\s -> s{visibleWidth = newWidth, mainVisibleHeight = newHeight - 6
+    , mainCursor = min (mainCursor s) (newHeight -1)})
   updateView False
 eventHandler _ = pure ()
 
@@ -134,10 +138,26 @@ cursorUpMenu = do
 
 cursorTrigger :: EventM n AppState ()
 cursorTrigger = do
-  vm <- gets visibleMenu
-  case vm of
-    NoMenu -> viewTorrent
-    Sort   -> setSortKey
+  maybeDialog <- gets visibleDialog
+  case maybeDialog of
+    Nothing -> do
+     vm <- gets visibleMenu
+     case vm of
+       NoMenu -> viewTorrent
+       Sort   -> setSortKey
+    Just aDialog -> do
+      let maybeResponse = dialogSelection aDialog
+      case maybeResponse of
+          Nothing -> pure ()
+          Just (_, response) -> case response of
+             Nothing -> pure ()
+             Just (Alert _) -> pure ()
+             Just (Remove (toRemove, removeData)) -> do
+               fifoVar <- gets T.queue
+               view <- gets T.view
+               liftIO $ runEff . runConcurrent . atomically $ do
+                  enqueueShared (False, view, Delete (toRemove, removeData)) fifoVar
+      modify (\s -> s{visibleDialog = Nothing})
 
 pageDown :: EventM String AppState ()
 pageDown = do
@@ -211,9 +231,21 @@ selectDown = do
 
 removeTorrent :: Bool -> EventM n AppState ()
 removeTorrent removeData = do
-  view <- gets T.view
-  fifoVar <- gets T.queue
+  width <- gets visibleWidth
   toRemove <- S.toList <$> gets selected
-  unless (null toRemove) $ -- need to report if selection is empty, need failsafe
-    liftIO $ runEff . runConcurrent . atomically $ do
-      enqueueShared (False, view, Delete (toRemove, removeData)) fifoVar
+  let theDialog = if null toRemove then Alert "No torrent selected"
+                                   else Remove (toRemove, removeData)
+  modify (\s -> s {visibleDialog = Just (mkDialog theDialog width)})
+
+tabSwitch :: EventM n AppState ()
+tabSwitch = do
+  vd <- gets visibleDialog
+  case vd of
+    Nothing -> pure ()
+    Just d -> do
+      let buttons = dialogButtons d
+          focus = getDialogFocus d
+          i = maybe 0 read focus 
+          i' = (i + 1) `mod` length buttons
+          d' = setDialogFocus (show i') d
+      modify (\s -> s {visibleDialog = Just d'})
