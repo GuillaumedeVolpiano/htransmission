@@ -113,7 +113,7 @@ cursorDownMenu = do
   cursor <- gets menuCursor
   let menuSize = case menu of
                    Sort   -> 12
-                   NoMenu -> undefined
+                   NoMenu -> error "Trying to set menu size when there is no menu displayed"
       cursor' = min (cursor + 1) menuSize
   modify (\s -> s {menuCursor = cursor'})
 
@@ -175,7 +175,7 @@ pageUp = do
   modify (\s -> s {mainCursor = 0, mainOffset = offset'})
 
 viewTorrent :: EventM n AppState ()
-viewTorrent = undefined -- need to build single torrent view
+viewTorrent = error "need to build single torrent view"
 
 setSortKey :: EventM n AppState ()
 setSortKey = do

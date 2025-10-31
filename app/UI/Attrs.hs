@@ -1,17 +1,21 @@
-module UI.Attrs 
+module UI.Attrs
   (cursorAttr
   , attrMap
   , selectedAttr)
 where
-import Brick (AttrName, attrName, AttrMap)
-import Graphics.Vty (defAttr, reverseVideo, withStyle, green, withForeColor)
-import qualified Brick.AttrMap as BA (attrMap)
-import Brick.Widgets.Dialog (buttonSelectedAttr)
+import           Brick                     (AttrMap, AttrName, attrName)
+import qualified Brick.AttrMap             as BA (attrMap)
+import           Brick.Widgets.Dialog      (buttonSelectedAttr)
+import           Brick.Widgets.ProgressBar (progressCompleteAttr)
+import           Graphics.Vty              (defAttr, green, reverseVideo,
+                                            withBackColor, withForeColor,
+                                            withStyle)
 
 attrMap :: AttrMap
 attrMap = BA.attrMap defAttr [(cursorAttr, defAttr `withStyle` reverseVideo),
                               (selectedAttr, defAttr `withForeColor` green),
-                              (buttonSelectedAttr, defAttr `withStyle` reverseVideo)
+                              (buttonSelectedAttr, defAttr `withStyle` reverseVideo),
+                              (progressCompleteAttr, defAttr `withBackColor` green)
                              ]
 
 cursorAttr :: AttrName

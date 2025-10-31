@@ -129,7 +129,7 @@ matchedTorrentView selection torrent = select selection torrent $
   <+> hLimit 20 (padRight Max (txt . T.intercalate " " . fromMaybe [] $ labels torrent))
 
 percentView :: Ord n => Rational -> Widget n
-percentView = progressBar Nothing . (/100) . fromRational
+percentView pc = progressBar (Just ((show (round pc :: Int) ++ " %"))) (fromRational pc / 100)
 
 sizeView :: Ord n => Int -> Widget n
 sizeView s
@@ -192,7 +192,7 @@ sessionView sesh seshStats = padLeft Max (str "Down: ") <+> sizeView (downloadSp
 
 torrentData :: Ord n => [Torrent] -> Widget n
 torrentData torrents = hLimitPercent 50 . padRight Max $
-  str "Total size: " <+> sizeView totSize
+  str (show . length $ torrents) <+> str " torrents   " <+> str "Total size: " <+> sizeView totSize
 
   where
     totSize = sum . mapMaybe totalSize $ torrents
