@@ -29,7 +29,7 @@ data FIFOSet a where
              } -> FIFOSet a
 
 data Sort = Name | PercentComplete | Downloaded | DownloadSpeed | Uploaded | UploadSpeed | ETA | Ratio | TotalSize
-  | Peers | Seeds | DateAdded | Labels deriving (Enum, Eq)
+  | Peers | Seeds | DateAdded | Labels deriving (Enum, Eq, Ord)
 
 data Req = Get | Delete ([Int], Bool) | Add [(FilePath, FilePath, [Label])] deriving (Eq, Ord)
 

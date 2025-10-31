@@ -40,16 +40,17 @@ import           UI.Types                  (AppState, Menu (NoMenu, Sort),
                                             mainVisibleHeight, menuCursor,
                                             selected, session, sessionStats,
                                             view, visibleMenu, visibleDialog)
-import           UI.Utils                  (highlightRow, sel)
+import qualified UI.Types as UT (torrents)
+import           UI.Utils                  (highlightRow)
 
 mkView :: AppState -> [Widget String]
 mkView s = pure .
   showDialog . showMenu $ mainWidget
   where
     mainWidget
-      | view s == Prune = matchedView Prune (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) vh 
+      | view s == Prune = matchedView Prune (mainCursor s) (UT.torrents s) (session s) (sessionStats s) (selected s) vh
         (mainOffset s)
-      | otherwise = mainView (view s) (mainCursor s) (sel s) (session s) (sessionStats s) (selected s) vh 
+      | otherwise = mainView (view s) (mainCursor s) (UT.torrents s) (session s) (sessionStats s) (selected s) vh
         (mainOffset s)
     showMenu = case visibleMenu s of
                  NoMenu -> joinBorders
@@ -129,7 +130,7 @@ matchedTorrentView selection torrent = select selection torrent $
   <+> hLimit 20 (padRight Max (txt . T.intercalate " " . fromMaybe [] $ labels torrent))
 
 percentView :: Ord n => Rational -> Widget n
-percentView pc = progressBar (Just ((show (round pc :: Int) ++ " %"))) (fromRational pc / 100)
+percentView pc = progressBar (Just (show (round pc :: Int) ++ " %")) (fromRational pc / 100)
 
 sizeView :: Ord n => Int -> Widget n
 sizeView s

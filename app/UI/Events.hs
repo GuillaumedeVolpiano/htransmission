@@ -39,13 +39,13 @@ import           Transmission.RPC.Torrent (toId)
 import           Types                    (Req (Delete, Get))
 import qualified UI.Types                 as T (keyHandler, queue, reverseSort,
                                                 session, sessionStats, torrents,
-                                                view)
+                                                view, sortKey)
 import           UI.Types                 (AppState (visibleDialog), Events (..),
                                            Menu (NoMenu, Sort), View,
                                            mainCursor, mainOffset,
                                            mainVisibleHeight, menuCursor,
-                                           selected, sortKey, visibleMenu, visibleWidth, DialogContent (Alert, Remove))
-import           UI.Utils                 (actionFromView, sel, mkDialog)
+                                           selected, visibleMenu, visibleWidth, DialogContent (Alert, Remove))
+import           UI.Utils                 (actionFromView, mkDialog)
 import           Utils                    (sortTorrents)
 import Brick.Widgets.Dialog (dialogSelection, dialogButtons, getDialogFocus, setDialogFocus)
 
@@ -54,35 +54,37 @@ appStartEvent = do
   vty <- getVtyHandle
   (width, height) <- liftIO $ displayBounds . outputIface $ vty
   modify (\s -> s{mainVisibleHeight = height - 6, visibleWidth = width})
-  updateView True
+  updateView True True
 
 eventHandler :: BrickEvent String Events -> EventM String AppState ()
-eventHandler (AppEvent Tick) = updateView False >> continueWithoutRedraw
+eventHandler (AppEvent (Tick major)) = updateView False major >> continueWithoutRedraw
 eventHandler (AppEvent (Updated isSwitching view torrents sesh seshStats)) =
-  if isSwitching then modify (\a -> a{T.view = view, T.torrents = sortTorrents (sortKey a) (T.reverseSort a) torrents, T.session = sesh
+  if isSwitching then modify (\a -> a{T.view = view, T.torrents = sortTorrents (T.sortKey a) (T.reverseSort a) torrents, T.session = sesh
     , T.sessionStats = seshStats})
   else do
     curView <- gets T.view
     if actionFromView view == actionFromView curView then
-                                         modify (\a -> a{T.torrents = sortTorrents (sortKey a) (T.reverseSort a) torrents, T.session = sesh
+                                         modify (\a -> a{T.torrents = sortTorrents (T.sortKey a) (T.reverseSort a) torrents, T.session = sesh
                                            , T.sessionStats = seshStats})
                                          else continueWithoutRedraw
 eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
 eventHandler (VtyEvent (EvResize newWidth newHeight)) = do
   modify (\s -> s{visibleWidth = newWidth, mainVisibleHeight = newHeight - 6
     , mainCursor = min (mainCursor s) (newHeight -1)})
-  updateView False
+  updateView False False
 eventHandler _ = pure ()
 
-updateView :: Bool -> EventM n AppState ()
-updateView isSwitching = do
+updateView :: Bool -> Bool -> EventM n AppState ()
+updateView isSwitching isMajor = do
   view <- gets T.view
   fifoVar <- gets T.queue
+  sortKey <- gets T.sortKey
+  rSort <- gets T.reverseSort
   liftIO $ runEff . runConcurrent . atomically $ do
-    enqueueShared (isSwitching, view, Get) fifoVar
+    enqueueShared (isSwitching, view, Get, sortKey, rSort, isMajor) fifoVar
 
 switchView :: View -> EventM n AppState ()
-switchView view = modify (\a -> a{T.view=view}) >> updateView True >> continueWithoutRedraw
+switchView view = modify (\a -> a{T.view=view}) >> updateView True False >> continueWithoutRedraw
 
 menuOnOff :: Menu -> EventM n AppState ()
 menuOnOff menu = do
@@ -100,7 +102,7 @@ cursorDownMain :: EventM n AppState ()
 cursorDownMain = do
   s <- get
   let cursor = mainCursor s
-      tors = sel s
+      tors = T.torrents s
       offset = mainOffset s
       height = mainVisibleHeight s
       cursor' = if cursor == height - 1 || cursor + offset == length tors - 1 then cursor else cursor + 1
@@ -155,8 +157,11 @@ cursorTrigger = do
              Just (Remove (toRemove, removeData)) -> do
                fifoVar <- gets T.queue
                view <- gets T.view
-               liftIO $ runEff . runConcurrent . atomically $ do
-                  enqueueShared (False, view, Delete (toRemove, removeData)) fifoVar
+               sortKey <- gets T.sortKey
+               rSort <- gets T.reverseSort
+               liftIO $ runEff . runConcurrent . atomically $ 
+                enqueueShared (False, view, Delete (toRemove, removeData), sortKey, rSort, True) fifoVar
+               modify (\s -> s{selected=mempty}) 
       modify (\s -> s{visibleDialog = Nothing})
 
 pageDown :: EventM String AppState ()
@@ -180,16 +185,16 @@ viewTorrent = error "need to build single torrent view"
 setSortKey :: EventM n AppState ()
 setSortKey = do
   sk <- toEnum <$> gets menuCursor
-  curSk <- gets sortKey
+  curSk <- gets T.sortKey
   reversed <- gets T.reverseSort
   let reversed' = if sk == curSk then not reversed else reversed
   torrents' <- sortTorrents curSk reversed' <$> gets T.torrents
-  modify (\s -> s{sortKey = sk, visibleMenu = NoMenu, T.reverseSort = reversed', T.torrents = torrents'})
+  modify (\s -> s{T.sortKey = sk, visibleMenu = NoMenu, T.reverseSort = reversed', T.torrents = torrents'})
 
 reverseSort :: EventM n AppState ()
 reverseSort = do
   reversed <- gets T.reverseSort
-  sk <- gets sortKey
+  sk <- gets T.sortKey
   torrents' <- sortTorrents sk (not reversed) <$> gets T.torrents
   modify (\s -> s{T.reverseSort = not reversed, T.torrents = torrents'})
 

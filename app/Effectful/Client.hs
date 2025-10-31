@@ -1,20 +1,20 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeOperators    #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
 module Effectful.Client (
                           enqueueShared
                         , startClient)
 where
 import           Brick.BChan               (BChan)
 import qualified Brick.BChan               as BB (writeBChan)
-import           Constants                 (arrPaths, basicSession,
-                                            mainTorrents, matchedTorrents,
-                                            pathMap)
-import           Control.Monad             (forever, void)
+import           Constants                 (basicSession,
+                                            mainTorrents)
+import           Control.Monad             (forever, void, when)
 import qualified Data.Text as T (pack)
 import           Effectful                 (Eff, (:>))
 import           Effectful.Concurrent      (Concurrent, forkIO)
 import           Effectful.Concurrent.STM  (STM, TVar, atomically, readTVar,
-                                            writeTVar)
+                                            writeTVar, writeTChan, readTVarIO)
 import           Effectful.Dispatch.Static (unsafeEff_)
 import           Effectful.FileSystem      (FileSystem)
 import           Effectful.Log             (Log, logInfo_)
@@ -28,13 +28,15 @@ import           Transmission.RPC.Client   (addTorrent, deleteTorrent,
                                             sessionStats)
 import           Transmission.RPC.Session  (Session, SessionStats)
 import           Transmission.RPC.Torrent
-import           Transmission.RPC.Types    (Client, ID (ID), IDs (IDs), Label,
+import qualified Transmission.RPC.Types as TT (Client)
+import           Transmission.RPC.Types    (ID (ID), IDs (IDs), Label,
                                             TorrentRef (Path))
-import           Types                     (Action (Matched), FIFOSet, Req (..),
+import           Types                     (FIFOSet, Req (..),
                                             dequeue, enqueue)
-import           UI.Types                  (Events (Updated), View (Prune))
-import           UI.Utils                  (actionFromView)
-import           Utils                     (extractPrunable, mkPathMap)
+import           UI.Types                  (Events (Updated))
+import           UI.Utils                  (sel)
+import Effectful.Types (Client, uiIn, uiOut, matcherIn, matcherOut, newUpdate)
+import Data.Maybe (fromJust)
 
 writeBChan :: Concurrent :> es => BChan a -> a -> Eff es ()
 writeBChan chan = unsafeEff_ . BB.writeBChan chan
@@ -54,46 +56,45 @@ dequeueShared fifoVar = do
       writeTVar fifoVar fifoSet'
       pure (Just x)
 
-startClient :: (Reader Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es)
-            => TVar (FIFOSet (Bool, View, Req)) -> BChan Events -> Eff es ()
-startClient fifoVar bChan = void . forkIO $ forever $ do
+startClient :: (Reader TT.Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es)
+            => Client -> Eff es ()
+startClient client = void . forkIO $ forever $ do
+  let fifoVar = uiIn client
+      bChan = uiOut client
+      setVar = matcherIn client
+      tVar = matcherOut client
+      tChan = newUpdate client
+  torrents <- readTVarIO tVar
   maybeView <- atomically $ dequeueShared fifoVar
   case maybeView of
     Nothing -> pure ()
-    (Just (isSwitch, view, req)) -> do
+    (Just (isSwitch, view, req, sortKey, reverseSort, isMajor)) -> do
       case req of
         Get -> pure ()
         Delete tors@(torIds, deleteData) -> do
           logInfo_ (T.pack ("Deleting torrents " ++ show tors)) 
           deleteTorrent (IDs . map ID $ torIds) deleteData Nothing
-          (torrents, sesh, seshStats) <- getElements . actionFromView $  view
-          writeBChan bChan (Updated isSwitch view torrents sesh seshStats)
-        Add tors -> do
-          addElements tors
-      (torrents, sesh, seshStats) <- getElements . actionFromView $ view
-      torrents' <- treatTorrents view torrents
-      writeBChan bChan (Updated isSwitch view torrents' sesh seshStats)
+        Add tors -> addElements tors
+      (torrents', sesh, seshStats) <- getElements isMajor torrents
+      when isMajor $ do 
+        atomically $ writeTChan tChan isMajor
+        atomically $ writeTVar tVar torrents'
+      unmatched <- readTVarIO setVar 
+      let torrents'' = sel view unmatched sortKey reverseSort torrents'
+      writeBChan bChan (Updated isSwitch view torrents'' sesh seshStats)
 
-getElements :: (Reader Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es) => Action
-            -> Eff es ([Torrent], Session, SessionStats)
-getElements action = do
-    let fields = case action of
-                Matched -> matchedTorrents
-                _       -> mainTorrents
-    torrents <- case action of
-                  Matched -> getTorrents Nothing (Just fields) Nothing
-                    >>= extractPrunable arrPaths (mkPathMap pathMap)
-                  _ -> getTorrents Nothing (Just fields) Nothing
+getElements :: (Reader TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es) =>
+    Bool -> [Torrent] -> Eff es ([Torrent], Session, SessionStats)
+getElements isMajor torrents = do
+    let tids = if isMajor then Nothing else Just . IDs  . map (ID . fromJust . toId) $ torrents 
+    torrents' <- getTorrents tids (Just mainTorrents) Nothing
     sesh <- getSession (Just basicSession) Nothing
     seshStats <- sessionStats Nothing
-    pure (torrents, sesh, seshStats)
+    pure (torrents', sesh, seshStats)
 
-addElements :: (Reader Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es) =>
+addElements :: (Reader TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es) =>
   [(FilePath, FilePath, [Label])]-> Eff es ()
 addElements torIds = do
   mapM_ ((\(t, d, l) -> addTorrent t Nothing d Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing l Nothing) . (\(a, b, c) -> (Path a, Just b, Just c))) torIds
 
-treatTorrents :: (Unix :> es) => View -> [Torrent] -> Eff es [Torrent]
-treatTorrents Prune = extractPrunable arrPaths (mkPathMap pathMap)
-treatTorrents _ = pure
 

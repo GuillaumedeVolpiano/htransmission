@@ -23,7 +23,8 @@ module UI.Types (View(..),
                 visibleDialog,
                 Menu(..),
                 newState,
-                DialogContent (..)
+                DialogContent (..),
+                Request
   )
 where
 import           Brick                           (EventM)
@@ -78,7 +79,7 @@ data AppState where
                sessionStats :: SessionStats,
                keyBindings :: KeyConfig KeyEvent,
                keyHandler :: KeyDispatcher KeyEvent (EventM String AppState),
-               queue :: TVar (FIFOSet (Bool,View, Req)),
+               queue :: TVar Request,
                visibleMenu :: Menu,
                menuCursor :: Int,
                mainCursor :: Int,
@@ -94,14 +95,16 @@ data AppState where
                 AppState
 
 data Events where
-  Tick :: Events
+  Tick :: Bool -> Events
   Updated :: Bool -> View -> [Torrent] -> Session -> SessionStats -> Events
 
 data Menu = NoMenu | Sort deriving Eq
 
 data DialogContent = Alert Text | Remove ([Int], Bool)
 
+type Request = FIFOSet (Bool, View, Req, Sort, Bool, Bool)
 
-newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> TVar (FIFOSet (Bool, View, Req)) -> AppState
+newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) 
+         -> TVar (FIFOSet (Bool, View, Req, Sort, Bool, Bool)) -> AppState
 newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
   q NoMenu 0 0 Name False mempty 0 0 0 0 Nothing

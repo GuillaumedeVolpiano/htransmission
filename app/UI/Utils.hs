@@ -10,24 +10,24 @@ import           Brick                    (CursorLocation (CursorLocation, curso
                                            Location (Location), Widget, txt,
                                            withAttr, str)
 import           Brick.Widgets.Dialog     (Dialog, dialog)
-import           Data.Maybe               (fromMaybe)
+import           Data.Maybe               (fromMaybe, fromJust)
 import           Transmission.RPC.Torrent (Torrent, errorCode, progress,
-                                           rateDownload, rateUpload, status)
+                                           rateDownload, rateUpload, status, toId)
 import qualified Transmission.RPC.Types   as TT (Error (OK),
                                                  Status (Downloading, Seeding, Stopped))
-import           Types                    (Action (Global, Matched))
+import           Types                    (Action (Global, Matched), Sort)
 import           UI.Attrs                 (cursorAttr)
 import           UI.Types                 (AppState, DialogContent (Alert, Remove),
                                            Menu (NoMenu),
                                            View (Complete, Downloading, Error, Inactive, Main, Paused, Prune, Seeding),
-                                           mainCursor, menuCursor, reverseSort,
-                                           sortKey, torrents, view, visibleMenu)
+                                           mainCursor, menuCursor, visibleMenu)
 import           Utils                    (sortTorrents)
+import Data.IntSet (IntSet, member)
 
-sel :: AppState -> [Torrent]
-sel state = sortTorrents (sortKey state) (reverseSort state). filter selector . torrents $ state
+sel :: View -> IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
+sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filter selector
   where
-  selector = case view state of
+  selector = case view of
       Main        -> const True
       Downloading -> (== Just TT.Downloading) . status
       Seeding     -> (== Just TT.Seeding) . status
@@ -35,7 +35,7 @@ sel state = sortTorrents (sortKey state) (reverseSort state). filter selector . 
       Paused      -> (== Just TT.Stopped) . status
       Inactive    -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
       Error       -> (/= Just TT.OK) . errorCode
-      Prune       -> const True
+      Prune       -> flip member unmatched . fromJust . toId
 
 actionFromView :: View -> Action
 actionFromView Prune = Matched

@@ -13,12 +13,16 @@ import Effectful (Eff, (:>))
 import Control.Monad (forever, void)
 import Effectful.Concurrent (Concurrent, forkIO, threadDelay)
 import Effectful.Dispatch.Static (unsafeEff_)
+import Effectful.Prim.IORef (newIORef, readIORef, writeIORef, Prim)
 
 writeBChan :: (Concurrent :> es) => BChan a -> a -> Eff es ()
 writeBChan chan = unsafeEff_ . BB.writeBChan chan
 
-startTimer :: (Concurrent :> es) => BChan Events -> Eff es ()
-startTimer chan = void $ forkIO $ forever $ do
-  void $ threadDelay 1000000
-  writeBChan chan Tick
-
+startTimer :: (Prim :> es, Concurrent :> es) => BChan Events -> Eff es ()
+startTimer chan = void $ do
+  tickCounterRef <- newIORef (0 :: Int) 
+  forkIO $ forever $ do
+    void $ threadDelay 1000000
+    counter <- readIORef tickCounterRef
+    writeBChan chan $ Tick (counter == 0)
+    writeIORef tickCounterRef ((counter + 1) `mod` 5)

@@ -70,6 +70,8 @@ executable htransmission
     Constants
     Effectful.Client
     Effectful.Timer
+    Effectful.Matcher
+    Effectful.Types
     Types
     UI.Attrs
     UI.Constants
