@@ -24,7 +24,8 @@ module UI.Types (View(..),
                 Menu(..),
                 newState,
                 DialogContent (..),
-                Request
+                Request,
+                getView
   )
 where
 import           Brick                           (EventM)
@@ -40,7 +41,7 @@ import           Transmission.RPC.Session        (Session, SessionStats,
 import           Transmission.RPC.Torrent        (Torrent)
 import           Types                           (FIFOSet, Req, Sort (Name))
 
-data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched | SingleTorrent Int
+data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched | SingleTorrent Int View
   deriving (Eq, Ord, Show)
 
 data KeyEvent =
@@ -108,3 +109,7 @@ newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppSta
          -> TVar (FIFOSet (Bool, View, Req, Sort, Bool, Bool)) -> AppState
 newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
   q NoMenu 0 0 Name False mempty 0 0 0 0 Nothing
+
+getView :: View -> View
+getView (SingleTorrent _ v) = v
+getView v = v

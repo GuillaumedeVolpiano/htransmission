@@ -25,6 +25,8 @@ import           Brick                    (BrickEvent (AppEvent, VtyEvent),
                                            EventM, continueWithoutRedraw, get,
                                            getVtyHandle, gets, modify, put)
 import           Brick.Keybindings        (handleKey)
+import           Brick.Widgets.Dialog     (dialogButtons, dialogSelection,
+                                           getDialogFocus, setDialogFocus)
 import           Control.Monad            (void, when)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import           Data.IntSet              (delete, insert, member)
@@ -38,16 +40,17 @@ import           Graphics.Vty             (Event (EvKey, EvResize),
 import           Transmission.RPC.Torrent (toId)
 import           Types                    (Req (Delete, Get))
 import qualified UI.Types                 as T (keyHandler, queue, reverseSort,
-                                                session, sessionStats, torrents,
-                                                view, sortKey)
-import           UI.Types                 (AppState (visibleDialog), Events (..),
-                                           Menu (NoMenu, Sort), View (SingleTorrent),
+                                                session, sessionStats, sortKey,
+                                                torrents, view)
+import           UI.Types                 (AppState (visibleDialog),
+                                           DialogContent (Alert, Remove),
+                                           Events (..), Menu (NoMenu, Sort),
+                                           View (SingleTorrent),
                                            mainCursor, mainOffset,
                                            mainVisibleHeight, menuCursor,
-                                           selected, visibleMenu, visibleWidth, DialogContent (Alert, Remove))
+                                           selected, visibleMenu, visibleWidth)
 import           UI.Utils                 (actionFromView, mkDialog)
 import           Utils                    (sortTorrents)
-import Brick.Widgets.Dialog (dialogSelection, dialogButtons, getDialogFocus, setDialogFocus)
 
 appStartEvent :: EventM String AppState ()
 appStartEvent = do
@@ -159,9 +162,9 @@ cursorTrigger = do
                view <- gets T.view
                sortKey <- gets T.sortKey
                rSort <- gets T.reverseSort
-               liftIO $ runEff . runConcurrent . atomically $ 
+               liftIO $ runEff . runConcurrent . atomically $
                 enqueueShared (False, view, Delete (toRemove, removeData), sortKey, rSort, True) fifoVar
-               modify (\s -> s{selected=mempty}) 
+               modify (\s -> s{selected=mempty})
       modify (\s -> s{visibleDialog = Nothing})
 
 pageDown :: EventM String AppState ()
@@ -183,8 +186,9 @@ viewTorrent :: EventM n AppState ()
 viewTorrent = do
   cursor <- gets mainCursor
   offset <- gets mainOffset
+  curView <- gets T.view
   let pos = cursor + offset
-  switchView (SingleTorrent pos)
+  switchView (SingleTorrent pos curView)
 
 
 setSortKey :: EventM n AppState ()
@@ -255,7 +259,7 @@ tabSwitch = do
     Just d -> do
       let buttons = dialogButtons d
           focus = getDialogFocus d
-          i = maybe 0 read focus 
+          i = maybe 0 read focus
           i' = (i + 1) `mod` length buttons
           d' = setDialogFocus (show i') d
       modify (\s -> s {visibleDialog = Just d'})

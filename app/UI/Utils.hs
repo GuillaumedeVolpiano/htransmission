@@ -7,29 +7,30 @@ module UI.Utils
 where
 
 import           Brick                    (CursorLocation (CursorLocation, cursorLocation, cursorLocationName, cursorLocationVisible),
-                                           Location (Location), Widget, txt,
-                                           withAttr, str)
+                                           Location (Location), Widget, str,
+                                           txt, withAttr)
 import           Brick.Widgets.Dialog     (Dialog, dialog)
-import           Data.Maybe               (fromMaybe, fromJust)
+import           Data.IntSet              (IntSet, member)
+import           Data.Maybe               (fromJust, fromMaybe)
 import           Transmission.RPC.Torrent (Torrent, errorCode, progress,
-                                           rateDownload, rateUpload, status, toId)
+                                           rateDownload, rateUpload, status,
+                                           toId)
 import qualified Transmission.RPC.Types   as TT (Error (OK),
                                                  Status (Downloading, Seeding, Stopped))
 import           Types                    (Action (Global, Matched), Sort)
 import           UI.Attrs                 (cursorAttr)
-import           UI.Types                 (AppState, DialogContent (Alert, Remove),
+import           UI.Types                 (AppState,
+                                           DialogContent (Alert, Remove),
                                            Menu (NoMenu),
-                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, Unmatched, SingleTorrent),
-                                           mainCursor, menuCursor, visibleMenu)
+                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched),
+                                           mainCursor, menuCursor, visibleMenu, getView)
 import           Utils                    (sortTorrents)
-import Data.IntSet (IntSet, member)
 
 sel :: View -> IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
 sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filter selector
   where
-  selector = case view of
+  selector = case getView view of
       Main        -> const True
-      SingleTorrent _ -> const True
       Downloading -> (== Just TT.Downloading) . status
       Seeding     -> (== Just TT.Seeding) . status
       Complete    -> (==100) . fromMaybe 0 . progress
@@ -37,10 +38,11 @@ sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filte
       Inactive    -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
       Error       -> (/= Just TT.OK) . errorCode
       Unmatched       -> flip member unmatched . fromJust . toId
+      SingleTorrent _ _ -> undefined
 
 actionFromView :: View -> Action
 actionFromView Unmatched = Matched
-actionFromView _     = Global
+actionFromView _         = Global
 
 appChooseCursor :: AppState -> [CursorLocation n] -> Maybe (CursorLocation n)
 appChooseCursor state _ = case visibleMenu state of
@@ -62,6 +64,6 @@ highlight = withAttr cursorAttr
 
 mkDialog :: DialogContent -> Int -> Dialog (Maybe DialogContent) String
 mkDialog (Alert text) = dialog (Just . txt $ text) (Just ("OK", [("OK", "0", Nothing)]))
-mkDialog r@(Remove (t, _)) = dialog 
+mkDialog r@(Remove (t, _)) = dialog
   (Just . str $ "Are you sure you want to remove " ++ show (length t) ++ " selected torrents")
   (Just ("0", [("No", "0", Nothing), ("Yes", "1", Just r)]))

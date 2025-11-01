@@ -4,7 +4,7 @@ module UI.Views (
   )
 where
 import           Brick                     (Padding (..), Widget, emptyWidget,
-                                            fill, hLimit, hLimitPercent,
+                                            fill, hBox, hLimit, hLimitPercent,
                                             padBottom, padLeft, padRight, str,
                                             txt, vBox, vLimit, withAttr, (<+>),
                                             (<=>))
@@ -28,15 +28,16 @@ import           Transmission.RPC.Session  (Session, SessionStats, currentStats,
                                             speedLimitUpEnabled, uploadSpeed,
                                             uploadedBytes)
 import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
-                                            activityDate, addedDate, doneDate,
-                                            downloadDir, downloadedEver, eta,
+                                            activityDate, addedDate, comment,
+                                            doneDate, downloadDir,
+                                            downloadedEver, errorString, eta,
                                             hashString, isPrivate, labels, name,
                                             peers, peersConnected,
                                             peersGettingFromUs,
                                             peersSendingToUs, progress,
                                             rateDownload, rateUpload, ratio,
                                             toId, totalSize, uploadedEver,
-                                            webseeds, webseedsSendingToUs, comment, errorString)
+                                            webseeds, webseedsSendingToUs)
 import           UI.Attrs                  (selectedAttr)
 import qualified UI.Types                  as UT (torrents)
 import           UI.Types                  (AppState, Menu (NoMenu, Sort),
@@ -51,7 +52,7 @@ mkView s = pure .
   showDialog . showMenu $ mainWidget
   where
     mainWidget
-      | view s == Unmatched = matchedView Unmatched (mainCursor s) (UT.torrents s) (session s) 
+      | view s == Unmatched = matchedView Unmatched (mainCursor s) (UT.torrents s) (session s)
         (sessionStats s) (selected s) vh (mainOffset s)
       | isJust tid = singleView (fromJust tid) (UT.torrents s) (session s) (sessionStats s) vh
       | otherwise = mainView (view s) (mainCursor s) (UT.torrents s) (session s) (sessionStats s) (selected s) vh
@@ -62,8 +63,8 @@ mkView s = pure .
     showDialog = maybe id renderDialog . visibleDialog $ s
     vh = if isNothing (visibleDialog s) then mainVisibleHeight s else mainVisibleHeight s - 3
     tid = case view s of
-            SingleTorrent i -> Just i
-            _               -> Nothing
+            SingleTorrent i _ -> Just i
+            _                 -> Nothing
 
 mainTorrentsView :: Int -> IntSet -> [Torrent] -> Widget String
 mainTorrentsView mc selection = foldr (<=>) emptyWidget . highlightRow mc . map (vLimit 1 . mainTorrentView selection)
@@ -160,17 +161,20 @@ sizeView s
 etaView :: Ord n => ETA -> Widget n
 etaView NA = padRight Max . str $ "∞"
 etaView (ETA t)
-          | weeks > 0 = padLeft Max . str $ show weeks ++ " w " ++ show days ++ " d"
-          | days > 0 = padLeft Max . str $ show days ++ " d " ++ show hours ++ " h"
+          | weeks > 0 = padLeft Max . str $ show weeks ++ " w " ++ show ds ++ " d"
+          | days > 0 = padLeft Max . str $ show days ++ " d " ++ show hrs ++ " h"
           | hours > 0 = padLeft Max . str $ show hours ++ " h " ++ show mins ++ " m"
-          | mins > 0 = padLeft Max . str $ show mins ++ ":" ++ show secs
+          | minutes > 0 = padLeft Max . str $ show minutes ++ ":" ++ show secs
           | otherwise = padLeft Max . str $ show secs ++ " s"
           where
             seconds = round . nominalDiffTimeToSeconds $ t :: Int
             secs = seconds `mod` 60
-            mins = div secs 60 `mod` 60
-            hours = div mins 60 `mod` 24
-            days =  div hours 24 `mod` 7
+            minutes = div seconds 60
+            mins = minutes `mod` 60
+            hours = div minutes 60
+            hrs = hours `mod` 24
+            days =  div hours 24
+            ds = days `mod` 7
             weeks = div days 7
 etaView Unknown = padRight Max . str $ "unknown"
 
@@ -228,48 +232,61 @@ sortMenu mc vh = (vLimit 2 . padBottom Max . hLimitPercent 10 . padRight Max . s
   , str "Downloaded", str "Download speed", str "Uploaded", str "Upload speed", str "ETA", str "Ratio"
   , str "Total size", str "Peers", str "Seeds", str "Date added", str "Labels"])
 
-singleView :: Int -> [Torrent] -> Session -> SessionStats -> Int -> Widget String
-singleView idx torrents sesh seshStats vh = borderWithLabel (txt . fromJust . name $ torrent) $ singleHeader 
-  <=> hBorder <=> vLimit vh (padBottom Max . singleTorrentView $ torrent) <=> hBorder 
+singleView :: Int -> [Torrent] -> Session -> SessionStats -> Int -> Widget String
+singleView idx torrents sesh seshStats vh = borderWithLabel (txt . fromJust . name $ torrent) $ singleHeader torrent
+  <=> vLimit vh (padBottom Max . singleTorrentView $ torrent) <=> hBorder
   <=> vLimit 1 (singleTorrentData idx (length torrents) <+> sessionView sesh seshStats)
   where
     torrent = torrents !! idx
 
 singleTorrentView :: Torrent -> Widget String
-singleTorrentView torrent = vLimit 1 (str "General" <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Added" <+> fill ' ') <+> str (show . fromJust . addedDate $ torrent) <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Location" <+> fill ' ') <+> str (fromJust . downloadDir $ torrent) 
-    <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Labels" <+> fill ' ') <+> txt (T.intercalate "," . fromJust . labels $ torrent) 
-    <+> fill ' ')
-  <=> vLimit 1 (fill ' ')
-  <=> vLimit 1 (str "Transfer" <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Finished" <+> fill ' ') <+> str (maybe "None" show . doneDate $ torrent) 
-    <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Downloaded" <+> fill ' ') <+> str (show . maybe (0 :: Int) round .  progress $ torrent)
-    <+> str "%" <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Peers" <+> fill ' ')
-    <+> str (show ((fromMaybe 0 . peersSendingToUs $ torrent) + (fromMaybe 0 . peersGettingFromUs $ torrent)))
-    <+> str " connected of " <+> str (show . maybe 0 length . peers $ torrent) <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Seeds" <+> fill ' ')
-    <+> str (show . fromMaybe 0 . webseedsSendingToUs $ torrent) <+> str " connected of "
-    <+> str (show . maybe 0 length . webseeds $ torrent) <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Last Activity" <+> fill ' ') <+> str (show . fromJust . activityDate $ torrent) 
-    <+> fill ' ')
-  <=> vLimit 1 (fill ' ')
-  <=> vLimit 1 (str "Torrent " <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Created" <+> fill ' ') <+> str (maybe "None" show . addedDate $ torrent) <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Hash" <+> fill ' ') <+> txt (fromMaybe "None" . hashString $ torrent) <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Size" <+> fill ' ') <+> sizeView (fromMaybe 0 . totalSize $ torrent) <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Type" <+> fill ' ') 
-    <+> str (if isPrivate torrent == Just True then "Private" else "Public") <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Comment" <+> fill ' ') <+> txt (fromMaybe "None" . comment $ torrent) <+> fill ' ')
-  <=> vLimit 1 (fill ' ')
-  <=> vLimit 1 (str "Tracker" <+> fill ' ')
-  <=> vLimit 1 (hLimit 50 (str "Tracker message" <+> fill ' ') <+> txt (fromMaybe "None" . errorString $ torrent) <+> fill ' ')
+singleTorrentView torrent = hBox [hLimit 50 . padRight Max . vBox $ [str "General", str "Added", str "Location"
+                                                                    , str "Labels", str " ", str "Transfer"
+                                                                    , str "Finished", str "Downloaded"
+                                                                    , str "Peers", str "Seeds", str "Last Activity"
+                                                                    , str " ", str "Torrent", str "Created"
+                                                                    , str "Hash", str "Size", str "Type"
+                                                                    , str "Comment", str " ", str "Tracker"
+                                                                    , str "Tracker Message"]
+                                 , padRight Max . vBox $ [str " ", str . show . fromJust . addedDate $ torrent
+                                                        , str . fromJust . downloadDir $ torrent
+                                                        , txt . T.intercalate "," . fromJust . labels $ torrent
+                                                        , str " ", str " "
+                                                        , str . maybe "None" show . doneDate $ torrent
+                                                        , hBox [str . show . maybe (0 :: Int) round .  progress 
+                                                                  $ torrent
+                                                               , str " %"]
+                                                        , hBox [str . show $ 
+                                                                  (fromMaybe 0 . peersSendingToUs $ torrent) 
+                                                                  + (fromMaybe 0 . peersGettingFromUs $ torrent)
+                                                               , str " connected of " 
+                                                               , str . show . maybe 0 length . peers $ torrent]
+                                                        , hBox [str . show . fromMaybe 0 . webseedsSendingToUs $ 
+                                                                  torrent
+                                                               , str " connected of "
+                                                               , str . show . maybe 0 length . webseeds $ torrent]
+                                                        , str . show . fromJust . activityDate $ torrent
+                                                        , str " ", str " "
+                                                        , str . maybe "None" show . addedDate $ torrent
+                                                        , txt . fromMaybe "None" . hashString $ torrent
+                                                        , sizeView . fromMaybe 0 . totalSize $ torrent
+                                                        , str $ if isPrivate torrent == Just True 
+                                                                   then "Private" 
+                                                                   else "Public"
+                                                        , txt . fromMaybe "None" . comment $ torrent
+                                                        , str " ", str " "
+                                                        , txt . fromMaybe "None" . errorString $ torrent]]
 
-singleHeader :: Widget String
-singleHeader = vLimit 1 (fill ' ')
+singleHeader :: Torrent -> Widget String
+singleHeader torrent = vBox [
+  vLimit 1 . hBox $ [sizeView . fromMaybe 0 . rateDownload $ torrent, str "/s"
+                                     , str " − ", sizeView . fromMaybe 0 . downloadedEver $ torrent
+                                     , str "   ", sizeView . fromMaybe 0 . rateUpload $ torrent, str "/s"
+                                     , str " - ", sizeView . fromMaybe 0 . uploadedEver $ torrent, str "   "
+                                     , str . show . maybe (0 :: Int) round . ratio $ torrent, str "   " 
+                                     , hLimit 10 . etaView . fromJust . eta $ torrent]
+                            , vLimit 1 . percentView . fromMaybe 0 . progress $ torrent]
+
 
 singleTorrentData :: Int -> Int -> Widget String
-singleTorrentData idx totSize = hLimitPercent 50 . padRight Max $ str (show (idx + 1) ++ '/':show totSize)
+singleTorrentData idx totSize = hLimitPercent 50 . padRight Max $ str (show (idx + 1) ++ '/':show totSize)
