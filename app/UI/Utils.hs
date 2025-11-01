@@ -19,7 +19,7 @@ import           Types                    (Action (Global, Matched), Sort)
 import           UI.Attrs                 (cursorAttr)
 import           UI.Types                 (AppState, DialogContent (Alert, Remove),
                                            Menu (NoMenu),
-                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Prune, Seeding),
+                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, Unmatched, SingleTorrent),
                                            mainCursor, menuCursor, visibleMenu)
 import           Utils                    (sortTorrents)
 import Data.IntSet (IntSet, member)
@@ -29,16 +29,17 @@ sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filte
   where
   selector = case view of
       Main        -> const True
+      SingleTorrent _ -> const True
       Downloading -> (== Just TT.Downloading) . status
       Seeding     -> (== Just TT.Seeding) . status
       Complete    -> (==100) . fromMaybe 0 . progress
       Paused      -> (== Just TT.Stopped) . status
       Inactive    -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
       Error       -> (/= Just TT.OK) . errorCode
-      Prune       -> flip member unmatched . fromJust . toId
+      Unmatched       -> flip member unmatched . fromJust . toId
 
 actionFromView :: View -> Action
-actionFromView Prune = Matched
+actionFromView Unmatched = Matched
 actionFromView _     = Global
 
 appChooseCursor :: AppState -> [CursorLocation n] -> Maybe (CursorLocation n)

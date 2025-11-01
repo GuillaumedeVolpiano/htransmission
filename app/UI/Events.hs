@@ -41,7 +41,7 @@ import qualified UI.Types                 as T (keyHandler, queue, reverseSort,
                                                 session, sessionStats, torrents,
                                                 view, sortKey)
 import           UI.Types                 (AppState (visibleDialog), Events (..),
-                                           Menu (NoMenu, Sort), View,
+                                           Menu (NoMenu, Sort), View (SingleTorrent),
                                            mainCursor, mainOffset,
                                            mainVisibleHeight, menuCursor,
                                            selected, visibleMenu, visibleWidth, DialogContent (Alert, Remove))
@@ -180,7 +180,12 @@ pageUp = do
   modify (\s -> s {mainCursor = 0, mainOffset = offset'})
 
 viewTorrent :: EventM n AppState ()
-viewTorrent = error "need to build single torrent view"
+viewTorrent = do
+  cursor <- gets mainCursor
+  offset <- gets mainOffset
+  let pos = cursor + offset
+  switchView (SingleTorrent pos)
+
 
 setSortKey :: EventM n AppState ()
 setSortKey = do

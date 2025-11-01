@@ -40,7 +40,8 @@ import           Transmission.RPC.Session        (Session, SessionStats,
 import           Transmission.RPC.Torrent        (Torrent)
 import           Types                           (FIFOSet, Req, Sort (Name))
 
-data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Prune deriving (Eq, Ord, Show)
+data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched | SingleTorrent Int
+  deriving (Eq, Ord, Show)
 
 data KeyEvent =
                 CloseMenuEvent
@@ -55,8 +56,7 @@ data KeyEvent =
               | PageUpEvent
               | PageDownEvent
               | PausedViewEvent
-
-              | PruneViewEvent
+              | UnmatchedViewEvent
               | QuitEvent
               | RemoveSelectedEvent
               | RemoveSelectedWithDataEvent
