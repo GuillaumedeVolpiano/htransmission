@@ -18,36 +18,42 @@ module UI.Events (
                  , selectDown
                  , appStartEvent
                  , tabSwitch
+                 , cursorLeft
+                 , cursorRight
+                 , menuOff
                  )
 where
 
 import           Brick                    (BrickEvent (AppEvent, VtyEvent),
-                                           EventM, get,
-                                           getVtyHandle, gets, modify, put)
+                                           EventM, get, getVtyHandle, gets,
+                                           modify, put)
 import           Brick.Keybindings        (handleKey)
 import           Brick.Widgets.Dialog     (dialogButtons, dialogSelection,
                                            getDialogFocus, setDialogFocus)
-import           Control.Monad            (void, when)
+import           Control.Monad            (unless, void, when)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import           Data.IntSet              (delete, insert, member)
 import qualified Data.IntSet              as S (fromList, toList)
 import           Data.Maybe               (fromJust)
 import           Effectful                (runEff)
-import           Effectful.Concurrent.STM (atomically, runConcurrent, writeTChan, modifyTVar', readTVarIO)
+import           Effectful.Concurrent.STM (atomically, modifyTVar', readTVarIO,
+                                           runConcurrent, writeTChan)
 import           Graphics.Vty             (Event (EvKey, EvResize),
                                            displayBounds, outputIface)
 import           Transmission.RPC.Torrent (toId)
-import           Types                    (Req (Get, Delete))
-import qualified UI.Types                 as T (keyHandler, reverseSort,
-                                                session, sessionStats, sortKey,
-                                                torrents, view, request, clientState, curView)
+import           Types                    (Req (Delete, Get))
+import qualified UI.Types                 as T (clientState, curView,
+                                                keyHandler, request,
+                                                reverseSort, session,
+                                                sessionStats, sortKey, torrents,
+                                                view)
 import           UI.Types                 (AppState (visibleDialog),
                                            DialogContent (Alert, Remove),
-                                           Events (..), Menu (NoMenu, Sort),
-                                           View (SingleTorrent),
-                                           mainCursor, mainOffset,
-                                           mainVisibleHeight, menuCursor,
-                                           selected, visibleMenu, visibleWidth)
+                                           Events (..), Menu (NoMenu, Sort, Single),
+                                           View (SingleTorrent), mainCursor,
+                                           mainOffset, mainVisibleHeight,
+                                           menuCursor, selected, visibleMenu,
+                                           visibleWidth)
 import           UI.Utils                 (mkDialog)
 import           Utils                    (sortTorrents)
 
@@ -77,7 +83,7 @@ switchView :: View -> EventM n AppState ()
 switchView view = do
   csVar <- gets T.clientState
   liftIO . runEff . runConcurrent . atomically $ modifyTVar' csVar (\s -> s{T.curView = view})
-  modify (\a -> a{T.view=view}) 
+  modify (\a -> a{T.view=view})
   updateView
 
 menuOnOff :: Menu -> EventM n AppState ()
@@ -86,11 +92,35 @@ menuOnOff menu = do
   let menu' = if curMenu == menu then NoMenu else menu
   modify (\s -> s{visibleMenu = menu', menuCursor = 0})
 
+menuOff :: EventM n AppState ()
+menuOff = do
+  curView <- gets T.view
+  curMenu <- gets visibleMenu
+  case curView of
+    SingleTorrent _ v _ -> modify (\s -> s{visibleMenu = NoMenu, T.view = v})
+    _ -> unless (curMenu == NoMenu) $ modify (\s -> s{visibleMenu = NoMenu})
 
 cursorDown :: EventM n AppState ()
 cursorDown = do
   vm <- gets visibleMenu
   if vm  == NoMenu then cursorDownMain else cursorDownMenu
+
+cursorLeft :: EventM n AppState ()
+cursorLeft = do
+  view <- gets T.view
+  case view of
+    SingleTorrent idx v pos -> unless (idx == 0) $ do
+      modify (\s -> s{T.view = SingleTorrent (idx - 1) v pos})
+    _ -> pure ()
+
+cursorRight :: EventM n AppState ()
+cursorRight = do
+  view <- gets T.view
+  maxIdx <- (-1 +) . length <$> gets T.torrents
+  case view of
+    SingleTorrent idx v pos -> unless (idx == maxIdx) $ do
+      modify (\s -> s{T.view = SingleTorrent (idx + 1) v pos})
+    _ -> pure ()
 
 cursorDownMain :: EventM n AppState ()
 cursorDownMain = do
@@ -109,6 +139,7 @@ cursorDownMenu = do
   cursor <- gets menuCursor
   let menuSize = case menu of
                    Sort   -> 12
+                   Single -> 4
                    NoMenu -> error "Trying to set menu size when there is no menu displayed"
       cursor' = min (cursor + 1) menuSize
   modify (\s -> s {menuCursor = cursor'})
@@ -141,6 +172,13 @@ cursorTrigger = do
      case vm of
        NoMenu -> viewTorrent
        Sort   -> setSortKey
+       Single -> do
+         p <- gets menuCursor
+         v <- gets T.view
+         case v of
+           SingleTorrent idx v' _ -> modify (\s -> s{T.view=SingleTorrent idx v' p})
+           _ -> undefined -- Single menu should only be visible in SingleTorrentView
+
     Just aDialog -> do
       let maybeResponse = dialogSelection aDialog
       case maybeResponse of
@@ -175,7 +213,8 @@ viewTorrent = do
   offset <- gets mainOffset
   curView <- gets T.view
   let pos = cursor + offset
-  switchView (SingleTorrent pos curView)
+  modify (\s -> s{visibleMenu = Single})
+  switchView (SingleTorrent pos curView 0)
 
 
 setSortKey :: EventM n AppState ()

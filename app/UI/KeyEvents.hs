@@ -19,11 +19,15 @@ import           Brick.Keybindings.KeyEvents     (keyEvents)
 import           Brick.Keybindings.Pretty        (ppBinding)
 import           Data.Maybe                      (fromJust)
 import qualified Data.Text                       as T (unpack)
-import           Graphics.Vty                    (Key (KChar, KDown, KFun, KUp, KEnter, KPageDown, KPageUp))
-import           UI.Events                       (cursorDown, cursorUp,
-                                                  menuOnOff, switchView, cursorTrigger,
-                                                  pageUp, pageDown, selectOne, selectAll,
-                                                  selectNone, selectUp, selectDown, removeTorrent, reverseSort, tabSwitch)
+import           Graphics.Vty                    (Key (KChar, KDown, KEnter, KFun, KLeft, KPageDown, KPageUp, KRight, KUp, KEsc))
+import           UI.Events                       (cursorDown, cursorLeft,
+                                                  cursorRight, cursorTrigger,
+                                                  cursorUp, menuOnOff, pageDown,
+                                                  pageUp, removeTorrent,
+                                                  reverseSort, selectAll,
+                                                  selectDown, selectNone,
+                                                  selectOne, selectUp,
+                                                  switchView, tabSwitch, menuOff)
 import           UI.Types                        (AppState, KeyEvent (..),
                                                   Menu (Sort), View (..))
 
@@ -38,11 +42,14 @@ allKeyEvents = keyEvents [
                           ("inactive view", InactiveViewEvent),
                           ("error view", ErrorViewEvent),
                           ("unreferenced view", UnmatchedViewEvent),
+                          ("close menu or single torrent view", MenuOffEvent),
                           ("display sort menu", SortMenuEvent),
                           ("reverse sort order", ReverseSortEvent),
                           ("close menu", CloseMenuEvent),
                           ("move cursor down", CursorDownEvent),
                           ("move cursor up", CursorUpEvent),
+                          ("move cursor right", CursorRightEvent),
+                          ("move cursor left", CursorLeftEvent),
                           ("cursor trigger", CursorTriggerEvent),
                           ("move the main view one page down", PageDownEvent),
                           ("move the main view one page up", PageUpEvent),
@@ -67,10 +74,13 @@ defaultBindings = [
                    (InactiveViewEvent, [meta 'i']),
                    (ErrorViewEvent, [ctrl 'e']),
                    (UnmatchedViewEvent, [ctrl 'u']),
+                   (MenuOffEvent, [bind KEsc]),
                    (SortMenuEvent, [bind (KFun 7)]),
                    (ReverseSortEvent, [bind (KChar 'r')]),
                    (CursorDownEvent, [bind KDown]),
                    (CursorUpEvent, [bind KUp]),
+                   (CursorRightEvent, [bind KRight]),
+                   (CursorLeftEvent, [bind KLeft]),
                    (CursorTriggerEvent, [bind KEnter]),
                    (PageDownEvent, [bind KPageDown]),
                    (PageUpEvent, [bind KPageUp]),
@@ -79,7 +89,7 @@ defaultBindings = [
                    (SelectNoneEvent, [ctrl 'd']),
                    (SelectUpEvent, [shift KUp]),
                    (SelectDownEvent, [shift KDown]),
-                   (RemoveSelectedEvent, [bind (KChar '-')]), -- switch to '-' and ctrl '-' once confirmation integrated
+                   (RemoveSelectedEvent, [bind (KChar '-')]),
                    (RemoveSelectedWithDataEvent, [meta '-']),
                    (TabSwitchEvent, [bind (KChar '\t')])
                   ]
@@ -98,10 +108,13 @@ handlers = [
             onEvent InactiveViewEvent "Switch to the inactive view" (switchView Inactive),
             onEvent ErrorViewEvent "Switch to the error view" (switchView Error),
             onEvent UnmatchedViewEvent "Switch to the unreferenced view" (switchView Unmatched),
+            onEvent MenuOffEvent "Exit the current menu or single torrent view" menuOff,
             onEvent SortMenuEvent "Display the sort menu" (menuOnOff Sort),
             onEvent ReverseSortEvent "Reverse the sort order" reverseSort,
             onEvent CursorDownEvent "Move the cursor down" cursorDown,
             onEvent CursorUpEvent "Move the cursor up" cursorUp,
+            onEvent CursorRightEvent "Move the cursor right" cursorRight,
+            onEvent CursorLeftEvent "Move the cursor left" cursorLeft,
             onEvent CursorTriggerEvent "Trigger the cursor action" cursorTrigger,
             onEvent PageDownEvent "Move the main viewport one page down" pageDown,
             onEvent PageUpEvent "Move the main viewport one page up" pageUp,

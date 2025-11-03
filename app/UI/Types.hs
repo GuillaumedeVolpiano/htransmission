@@ -44,7 +44,8 @@ import           Transmission.RPC.Session        (Session, SessionStats,
 import           Transmission.RPC.Torrent        (Torrent)
 import           Types                           (Req, Sort (Name))
 
-data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched | SingleTorrent Int View
+data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched 
+          | SingleTorrent Int View Int
   deriving (Eq, Ord, Show)
 
 data KeyEvent =
@@ -52,11 +53,14 @@ data KeyEvent =
               | CompleteViewEvent
               | CursorDownEvent
               | CursorUpEvent
+              | CursorLeftEvent
+              | CursorRightEvent
               | CursorTriggerEvent
               | DownloadingViewEvent
               | ErrorViewEvent
               | InactiveViewEvent
               | MainViewEvent
+              | MenuOffEvent
               | PageUpEvent
               | PageDownEvent
               | PausedViewEvent
@@ -107,7 +111,7 @@ data ClientState where
 data Events where
   Updated :: [Torrent] -> Session -> SessionStats -> Events
 
-data Menu = NoMenu | Sort deriving Eq
+data Menu = NoMenu | Sort | Single deriving Eq
 
 data DialogContent = Alert Text | Remove ([Int], Bool)
 
@@ -117,7 +121,7 @@ newState keyConfig dispatcher = AppState Main [] emptySession emptySessionStats 
   NoMenu 0 0 mempty 0 0 0 0 Nothing
 
 getView :: View -> View
-getView (SingleTorrent _ v) = v
+getView (SingleTorrent _ v _) = v
 getView v = v
 
 newClientState :: ClientState

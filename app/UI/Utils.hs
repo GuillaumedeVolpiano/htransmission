@@ -23,22 +23,23 @@ import           UI.Types                 (AppState,
                                            DialogContent (Alert, Remove),
                                            Menu (NoMenu),
                                            View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched),
-                                           mainCursor, menuCursor, visibleMenu, getView)
+                                           getView, mainCursor, menuCursor,
+                                           visibleMenu)
 import           Utils                    (sortTorrents)
 
 sel :: View -> IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
 sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filter selector
   where
   selector = case getView view of
-      Main        -> const True
-      Downloading -> (== Just TT.Downloading) . status
-      Seeding     -> (== Just TT.Seeding) . status
-      Complete    -> (==100) . fromMaybe 0 . progress
-      Paused      -> (== Just TT.Stopped) . status
-      Inactive    -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
-      Error       -> (/= Just TT.OK) . errorCode
-      Unmatched       -> flip member unmatched . fromJust . toId
-      SingleTorrent _ _ -> undefined
+      Main              -> const True
+      Downloading       -> (== Just TT.Downloading) . status
+      Seeding           -> (== Just TT.Seeding) . status
+      Complete          -> (==100) . fromMaybe 0 . progress
+      Paused            -> (== Just TT.Stopped) . status
+      Inactive          -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
+      Error             -> (/= Just TT.OK) . errorCode
+      Unmatched         -> flip member unmatched . fromJust . toId
+      SingleTorrent {}  -> undefined
 
 actionFromView :: View -> Action
 actionFromView Unmatched = Matched
