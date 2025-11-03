@@ -22,7 +22,7 @@ module UI.Events (
 where
 
 import           Brick                    (BrickEvent (AppEvent, VtyEvent),
-                                           EventM, continueWithoutRedraw, get,
+                                           EventM, get,
                                            getVtyHandle, gets, modify, put)
 import           Brick.Keybindings        (handleKey)
 import           Brick.Widgets.Dialog     (dialogButtons, dialogSelection,
@@ -33,15 +33,14 @@ import           Data.IntSet              (delete, insert, member)
 import qualified Data.IntSet              as S (fromList, toList)
 import           Data.Maybe               (fromJust)
 import           Effectful                (runEff)
-import           Effectful.Client         (enqueueShared)
-import           Effectful.Concurrent.STM (atomically, runConcurrent)
+import           Effectful.Concurrent.STM (atomically, runConcurrent, writeTChan, modifyTVar', readTVarIO)
 import           Graphics.Vty             (Event (EvKey, EvResize),
                                            displayBounds, outputIface)
 import           Transmission.RPC.Torrent (toId)
-import           Types                    (Req (Delete, Get))
-import qualified UI.Types                 as T (keyHandler, queue, reverseSort,
+import           Types                    (Req (Get, Delete))
+import qualified UI.Types                 as T (keyHandler, reverseSort,
                                                 session, sessionStats, sortKey,
-                                                torrents, view)
+                                                torrents, view, request, clientState, curView)
 import           UI.Types                 (AppState (visibleDialog),
                                            DialogContent (Alert, Remove),
                                            Events (..), Menu (NoMenu, Sort),
@@ -49,7 +48,7 @@ import           UI.Types                 (AppState (visibleDialog),
                                            mainCursor, mainOffset,
                                            mainVisibleHeight, menuCursor,
                                            selected, visibleMenu, visibleWidth)
-import           UI.Utils                 (actionFromView, mkDialog)
+import           UI.Utils                 (mkDialog)
 import           Utils                    (sortTorrents)
 
 appStartEvent :: EventM String AppState ()
@@ -57,37 +56,29 @@ appStartEvent = do
   vty <- getVtyHandle
   (width, height) <- liftIO $ displayBounds . outputIface $ vty
   modify (\s -> s{mainVisibleHeight = height - 6, visibleWidth = width})
-  updateView True True
+  updateView
 
 eventHandler :: BrickEvent String Events -> EventM String AppState ()
-eventHandler (AppEvent (Tick major)) = updateView False major >> continueWithoutRedraw
-eventHandler (AppEvent (Updated isSwitching view torrents sesh seshStats)) =
-  if isSwitching then modify (\a -> a{T.view = view, T.torrents = sortTorrents (T.sortKey a) (T.reverseSort a) torrents, T.session = sesh
-    , T.sessionStats = seshStats})
-  else do
-    curView <- gets T.view
-    if actionFromView view == actionFromView curView then
-                                         modify (\a -> a{T.torrents = sortTorrents (T.sortKey a) (T.reverseSort a) torrents, T.session = sesh
-                                           , T.sessionStats = seshStats})
-                                         else continueWithoutRedraw
+eventHandler (AppEvent (Updated torrents sesh seshStats)) =
+  modify (\a -> a{T.torrents = torrents, T.session = sesh, T.sessionStats = seshStats})
 eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
 eventHandler (VtyEvent (EvResize newWidth newHeight)) = do
   modify (\s -> s{visibleWidth = newWidth, mainVisibleHeight = newHeight - 6
     , mainCursor = min (mainCursor s) (newHeight -1)})
-  updateView False False
+  updateView
 eventHandler _ = pure ()
 
-updateView :: Bool -> Bool -> EventM n AppState ()
-updateView isSwitching isMajor = do
-  view <- gets T.view
-  fifoVar <- gets T.queue
-  sortKey <- gets T.sortKey
-  rSort <- gets T.reverseSort
-  liftIO $ runEff . runConcurrent . atomically $ do
-    enqueueShared (isSwitching, view, Get, sortKey, rSort, isMajor) fifoVar
+updateView :: EventM n AppState ()
+updateView = do
+  request <- gets T.request
+  liftIO $ runEff . runConcurrent . atomically $ writeTChan request Get
 
 switchView :: View -> EventM n AppState ()
-switchView view = modify (\a -> a{T.view=view}) >> updateView True False >> continueWithoutRedraw
+switchView view = do
+  csVar <- gets T.clientState
+  liftIO . runEff . runConcurrent . atomically $ modifyTVar' csVar (\s -> s{T.curView = view})
+  modify (\a -> a{T.view=view}) 
+  updateView
 
 menuOnOff :: Menu -> EventM n AppState ()
 menuOnOff menu = do
@@ -158,12 +149,8 @@ cursorTrigger = do
              Nothing -> pure ()
              Just (Alert _) -> pure ()
              Just (Remove (toRemove, removeData)) -> do
-               fifoVar <- gets T.queue
-               view <- gets T.view
-               sortKey <- gets T.sortKey
-               rSort <- gets T.reverseSort
-               liftIO $ runEff . runConcurrent . atomically $
-                enqueueShared (False, view, Delete (toRemove, removeData), sortKey, rSort, True) fifoVar
+               request <- gets T.request
+               liftIO $ runEff . runConcurrent . atomically $ writeTChan request (Delete (toRemove, removeData))
                modify (\s -> s{selected=mempty})
       modify (\s -> s{visibleDialog = Nothing})
 
@@ -194,18 +181,24 @@ viewTorrent = do
 setSortKey :: EventM n AppState ()
 setSortKey = do
   sk <- toEnum <$> gets menuCursor
-  curSk <- gets T.sortKey
-  reversed <- gets T.reverseSort
+  csVar <- gets T.clientState
+  clientState <- liftIO . runEff . runConcurrent . readTVarIO $ csVar
+  let curSk = T.sortKey clientState
+      reversed = T.reverseSort clientState
   let reversed' = if sk == curSk then not reversed else reversed
   torrents' <- sortTorrents curSk reversed' <$> gets T.torrents
-  modify (\s -> s{T.sortKey = sk, visibleMenu = NoMenu, T.reverseSort = reversed', T.torrents = torrents'})
+  liftIO . runEff . runConcurrent . atomically . modifyTVar' csVar $ (\s -> s{T.sortKey = sk, T.reverseSort = reversed'})
+  modify (\s -> s{visibleMenu = NoMenu, T.torrents = torrents'})
 
 reverseSort :: EventM n AppState ()
 reverseSort = do
-  reversed <- gets T.reverseSort
-  sk <- gets T.sortKey
+  csVar <- gets T.clientState
+  clientState <- liftIO . runEff . runConcurrent . readTVarIO $ csVar
+  let reversed = T.reverseSort clientState
+      sk = T.sortKey clientState
   torrents' <- sortTorrents sk (not reversed) <$> gets T.torrents
-  modify (\s -> s{T.reverseSort = not reversed, T.torrents = torrents'})
+  liftIO . runEff . runConcurrent . atomically . modifyTVar' csVar $ (\s -> s{T.reverseSort = not reversed})
+  modify (\s -> s{T.torrents = torrents'})
 
 
 selectOne :: EventM n AppState ()

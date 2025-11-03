@@ -9,7 +9,6 @@ module UI.Types (View(..),
                 sessionStats,
                 keyBindings,
                 keyHandler,
-                queue,
                 visibleMenu,
                 menuCursor,
                 mainCursor,
@@ -21,11 +20,15 @@ module UI.Types (View(..),
                 visibleWidth,
                 mainContentHeight,
                 visibleDialog,
+                request,
                 Menu(..),
                 newState,
                 DialogContent (..),
-                Request,
-                getView
+                getView,
+                ClientState,
+                curView,
+                clientState,
+                newClientState
   )
 where
 import           Brick                           (EventM)
@@ -34,12 +37,12 @@ import           Brick.Keybindings.KeyDispatcher (KeyDispatcher)
 import           Brick.Widgets.Dialog            (Dialog)
 import           Data.IntSet                     (IntSet)
 import           Data.Text
-import           Effectful.Concurrent.STM        (TVar)
+import           Effectful.Concurrent.STM        (TVar, TChan)
 import           Transmission.RPC.Session        (Session, SessionStats,
                                                   emptySession,
                                                   emptySessionStats)
 import           Transmission.RPC.Torrent        (Torrent)
-import           Types                           (FIFOSet, Req, Sort (Name))
+import           Types                           (Req, Sort (Name))
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched | SingleTorrent Int View
   deriving (Eq, Ord, Show)
@@ -78,38 +81,44 @@ data AppState where
                torrents :: [Torrent],
                session :: Session,
                sessionStats :: SessionStats,
-               keyBindings :: KeyConfig KeyEvent,
+               keyBindings :: KeyConfig KeyEvent,
                keyHandler :: KeyDispatcher KeyEvent (EventM String AppState),
-               queue :: TVar Request,
                visibleMenu :: Menu,
                menuCursor :: Int,
-               mainCursor :: Int,
-               sortKey :: Sort,
-               reverseSort :: Bool,
+               mainCursor :: Int,
                selected :: IntSet,
-               mainOffset :: Int,
-               mainVisibleHeight :: Int,
-               visibleWidth :: Int,
-               mainContentHeight :: Int,
-               visibleDialog :: Maybe (Dialog (Maybe DialogContent) String)
+               mainOffset :: Int,
+               mainVisibleHeight :: Int,
+               visibleWidth :: Int,
+               mainContentHeight :: Int,
+               visibleDialog :: Maybe (Dialog (Maybe DialogContent) String),
+               clientState :: TVar ClientState,
+               request :: TChan Req
                } ->
                 AppState
 
+data ClientState where
+  ClientState :: {
+                  curView :: View,
+                  sortKey :: Sort,
+                  reverseSort :: Bool
+                 } -> ClientState
+
 data Events where
-  Tick :: Bool -> Events
-  Updated :: Bool -> View -> [Torrent] -> Session -> SessionStats -> Events
+  Updated :: [Torrent] -> Session -> SessionStats -> Events
 
 data Menu = NoMenu | Sort deriving Eq
 
 data DialogContent = Alert Text | Remove ([Int], Bool)
 
-type Request = FIFOSet (Bool, View, Req, Sort, Bool, Bool)
+newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState)
+         -> TVar ClientState -> TChan Req -> AppState
+newState keyConfig dispatcher = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
+  NoMenu 0 0 mempty 0 0 0 0 Nothing
 
-newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) 
-         -> TVar (FIFOSet (Bool, View, Req, Sort, Bool, Bool)) -> AppState
-newState keyConfig dispatcher q = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
-  q NoMenu 0 0 Name False mempty 0 0 0 0 Nothing
-
-getView :: View -> View
+getView :: View -> View
 getView (SingleTorrent _ v) = v
 getView v = v
+
+newClientState :: ClientState
+newClientState = ClientState Main Name False

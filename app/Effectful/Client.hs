@@ -2,25 +2,27 @@
 {-# LANGUAGE TypeOperators    #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 module Effectful.Client (
-                          enqueueShared
-                        , startClient)
+                        startClient)
 where
 import           Brick.BChan               (BChan)
 import qualified Brick.BChan               as BB (writeBChan)
-import           Constants                 (basicSession,
-                                            mainTorrents)
+import           Constants                 (basicSession, mainTorrents)
 import           Control.Monad             (forever, void, when)
-import qualified Data.Text as T (pack)
+import           Data.Maybe                (fromJust, fromMaybe, isJust)
+import qualified Data.Text                 as T (pack)
 import           Effectful                 (Eff, (:>))
 import           Effectful.Concurrent      (Concurrent, forkIO)
-import           Effectful.Concurrent.STM  (STM, TVar, atomically, readTVar,
-                                            writeTVar, writeTChan, readTVarIO)
+import           Effectful.Concurrent.STM  (atomically, readTVarIO,
+                                            tryReadTChan, writeTChan, writeTVar)
 import           Effectful.Dispatch.Static (unsafeEff_)
 import           Effectful.FileSystem      (FileSystem)
 import           Effectful.Log             (Log, logInfo_)
 import           Effectful.Prim            (Prim)
 import           Effectful.Reader.Static   (Reader)
 import           Effectful.Time            (Time)
+import           Effectful.Types           (Client, matcherIn, matcherOut,
+                                            newUpdate, timerIn, uiIn, uiOut,
+                                            uiRequest)
 import           Effectful.Unix            (Unix)
 import           Effectful.Wreq            (Wreq)
 import           Transmission.RPC.Client   (addTorrent, deleteTorrent,
@@ -28,65 +30,56 @@ import           Transmission.RPC.Client   (addTorrent, deleteTorrent,
                                             sessionStats)
 import           Transmission.RPC.Session  (Session, SessionStats)
 import           Transmission.RPC.Torrent
-import qualified Transmission.RPC.Types as TT (Client)
+import qualified Transmission.RPC.Types    as TT (Client)
 import           Transmission.RPC.Types    (ID (ID), IDs (IDs), Label,
                                             TorrentRef (Path))
-import           Types                     (FIFOSet, Req (..),
-                                            dequeue, enqueue)
-import           UI.Types                  (Events (Updated))
+import           Types                     (Req (..))
+import qualified UI.Types                  as UT (reverseSort, sortKey)
+import           UI.Types                  (Events (Updated), curView)
 import           UI.Utils                  (sel)
-import Effectful.Types (Client, uiIn, uiOut, matcherIn, matcherOut, newUpdate)
-import Data.Maybe (fromJust)
 
 writeBChan :: Concurrent :> es => BChan a -> a -> Eff es ()
 writeBChan chan = unsafeEff_ . BB.writeBChan chan
 
-enqueueShared :: Ord a => a -> TVar (FIFOSet a) -> STM ()
-enqueueShared x fifoVar = do
-  fifoSet <- readTVar fifoVar
-  let fifoSet' = enqueue x fifoSet
-  writeTVar fifoVar fifoSet'
-
-dequeueShared :: Ord a => TVar (FIFOSet a) -> STM  (Maybe a)
-dequeueShared fifoVar = do
-  fifoSet <- readTVar fifoVar
-  case dequeue fifoSet of
-    Nothing -> pure Nothing
-    Just (x, fifoSet') -> do
-      writeTVar fifoVar fifoSet'
-      pure (Just x)
-
 startClient :: (Reader TT.Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es)
             => Client -> Eff es ()
 startClient client = void . forkIO $ forever $ do
-  let fifoVar = uiIn client
+  let stateVar = uiIn client
       bChan = uiOut client
       setVar = matcherIn client
       tVar = matcherOut client
       tChan = newUpdate client
+      tUpdate = uiRequest client
+      timerChan = timerIn client
   torrents <- readTVarIO tVar
-  maybeView <- atomically $ dequeueShared fifoVar
-  case maybeView of
-    Nothing -> pure ()
-    (Just (isSwitch, view, req, sortKey, reverseSort, isMajor)) -> do
+  clientState <- readTVarIO stateVar
+  maybeReq <- atomically $ tryReadTChan tUpdate
+  maybeMajor <- atomically $ tryReadTChan timerChan
+  when (isJust maybeReq || isJust maybeMajor) $ do
+    let isMajor = fromMaybe False maybeMajor
+        view = curView clientState
+        sortKey = UT.sortKey clientState
+        reverseSort = UT.reverseSort clientState
+    when (isJust maybeReq) $ do
+      let req = fromJust maybeReq
       case req of
-        Get -> pure ()
-        Delete tors@(torIds, deleteData) -> do
-          logInfo_ (T.pack ("Deleting torrents " ++ show tors)) 
-          deleteTorrent (IDs . map ID $ torIds) deleteData Nothing
-        Add tors -> addElements tors
-      (torrents', sesh, seshStats) <- getElements isMajor torrents
-      when isMajor $ do 
-        atomically $ writeTChan tChan isMajor
-        atomically $ writeTVar tVar torrents'
-      unmatched <- readTVarIO setVar 
-      let torrents'' = sel view unmatched sortKey reverseSort torrents'
-      writeBChan bChan (Updated isSwitch view torrents'' sesh seshStats)
+          Get -> pure ()
+          Delete tors@(torIds, deleteData) -> do
+            logInfo_ (T.pack ("Deleting torrents " ++ show tors))
+            deleteTorrent (IDs . map ID $ torIds) deleteData Nothing
+          Add tors -> addElements tors
+    (torrents', sesh, seshStats) <- getElements isMajor torrents
+    when isMajor $ do
+      atomically $ writeTChan tChan isMajor
+      atomically $ writeTVar tVar torrents'
+    unmatched <- readTVarIO setVar
+    let torrents'' = sel view unmatched sortKey reverseSort torrents'
+    writeBChan bChan (Updated torrents'' sesh seshStats)
 
 getElements :: (Reader TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es) =>
     Bool -> [Torrent] -> Eff es ([Torrent], Session, SessionStats)
 getElements isMajor torrents = do
-    let tids = if isMajor then Nothing else Just . IDs  . map (ID . fromJust . toId) $ torrents 
+    let tids = if isMajor then Nothing else Just . IDs  . map (ID . fromJust . toId) $ torrents
     torrents' <- getTorrents tids (Just mainTorrents) Nothing
     sesh <- getSession (Just basicSession) Nothing
     seshStats <- sessionStats Nothing

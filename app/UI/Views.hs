@@ -32,9 +32,7 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
                                             doneDate, downloadDir,
                                             downloadedEver, errorString, eta,
                                             hashString, isPrivate, labels, name,
-                                            peers, peersConnected,
-                                            peersGettingFromUs,
-                                            peersSendingToUs, progress,
+                                            peers, peersConnected, progress,
                                             rateDownload, rateUpload, ratio,
                                             toId, totalSize, uploadedEver,
                                             webseeds, webseedsSendingToUs)
@@ -257,8 +255,7 @@ singleTorrentView torrent = hBox [hLimit 50 . padRight Max . vBox $ [str "Genera
                                                                   $ torrent
                                                                , str " %"]
                                                         , hBox [str . show $ 
-                                                                  (fromMaybe 0 . peersSendingToUs $ torrent) 
-                                                                  + (fromMaybe 0 . peersGettingFromUs $ torrent)
+                                                                  (fromMaybe 0 . peersConnected $ torrent) 
                                                                , str " connected of " 
                                                                , str . show . maybe 0 length . peers $ torrent]
                                                         , hBox [str . show . fromMaybe 0 . webseedsSendingToUs $ 

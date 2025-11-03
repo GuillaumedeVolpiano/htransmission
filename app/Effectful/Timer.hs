@@ -1,28 +1,26 @@
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeOperators    #-}
 module Effectful.Timer (
                         startTimer
   )
 
 where
 
-import Brick.BChan (BChan)
-import qualified Brick.BChan as BB (writeBChan)
-import UI.Types (Events (Tick))
-import Effectful (Eff, (:>))
-import Control.Monad (forever, void)
-import Effectful.Concurrent (Concurrent, forkIO, threadDelay)
-import Effectful.Dispatch.Static (unsafeEff_)
-import Effectful.Prim.IORef (newIORef, readIORef, writeIORef, Prim)
+import           Control.Monad            (forever, void, when)
+import           Effectful                (Eff, (:>))
+import           Effectful.Concurrent     (Concurrent, forkIO, threadDelay)
+import           Effectful.Concurrent.STM (TChan, atomically, isEmptyTChan,
+                                           unGetTChan)
+import           Effectful.Prim.IORef     (Prim, newIORef, readIORef,
+                                           writeIORef)
 
-writeBChan :: (Concurrent :> es) => BChan a -> a -> Eff es ()
-writeBChan chan = unsafeEff_ . BB.writeBChan chan
-
-startTimer :: (Prim :> es, Concurrent :> es) => BChan Events -> Eff es ()
+startTimer :: (Prim :> es, Concurrent :> es) => TChan Bool -> Eff es ()
 startTimer chan = void $ do
-  tickCounterRef <- newIORef (0 :: Int) 
+  tickCounterRef <- newIORef (0 :: Int)
   forkIO $ forever $ do
     void $ threadDelay 1000000
     counter <- readIORef tickCounterRef
-    writeBChan chan $ Tick (counter == 0)
+    isEmpty <- atomically $ isEmptyTChan chan
+    when (isEmpty || counter == 0) $ do
+      atomically . unGetTChan chan $ (counter == 0)
     writeIORef tickCounterRef ((counter + 1) `mod` 5)
