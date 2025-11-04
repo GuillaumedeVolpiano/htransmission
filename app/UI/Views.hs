@@ -37,7 +37,7 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
                                             progress, rateDownload, rateUpload,
                                             ratio, toId, totalSize,
                                             uploadedEver, webseeds,
-                                            webseedsSendingToUs)
+                                            webseedsSendingToUs, address, rateToClient, rateToPeer, pProgress, clientName, isEncrypted, isIncoming)
 import           UI.Attrs                  (selectedAttr)
 import qualified UI.Types                  as UT (torrents)
 import           UI.Types                  (AppState,
@@ -250,7 +250,9 @@ singleView idx pos torrents sesh seshStats vh = borderWithLabel (txt . fromJust 
     torrent = torrents !! idx
     singleTorrentView = case pos of
                           0 -> singleTorrentDataView
-                          _ -> singleTorrentFilesView
+                          1 -> singleTorrentFilesView
+                          2 -> singleTorrentPeersView
+                          _ -> undefined
 
 singleTorrentDataView :: Torrent -> Widget String
 singleTorrentDataView torrent = hBox [hLimit 50 . padRight Max . vBox $ [str "General", str "Added", str "Location"
@@ -299,6 +301,32 @@ singleTorrentFilesView torrent = vBox $ str " " : hBox [str "   ", str . fromJus
                           , str . show . ((100 :: Int) *) . round $ fBytesCompleted f % fLength f
                           , str "%"
                          ]
+
+singleTorrentPeersView :: Torrent -> Widget String
+singleTorrentPeersView torrent = str "  " <=> vBox (str " " : hBox [
+                                                                    str "Peers: "
+                                                                  , hLimitPercent 30 . padRight Max . str . show 
+                                                                    . length . fromJust . peers $ torrent
+                                                                  , hLimitPercent 10 . padLeft Max . str $ "DL"
+                                                                  , hLimitPercent 10 . padLeft Max . str $ "UL"
+                                                                  , hLimitPercent 10 . padLeft Max . str $ "%"
+                                                                  , hLimitPercent 10 . padRight Max . str $ "Client"
+                                                                  , hLimitPercent 10 . padRight Max . str $ "Enc"
+                                                                  , hLimitPercent 10 . padRight Max . str $ "In"
+                                                                  ] : (map peerDetails . fromJust . peers $ torrent))
+  where
+    peerDetails p = hBox [
+                           str "       "
+                         , hLimitPercent 30 . padRight Max . txt . address $ p 
+                         , hLimitPercent 10 . padLeft Max . hBox $ [sizeView . rateToClient $ p, str "/s"]
+                         , hLimitPercent 10 . padLeft Max . hBox $ [sizeView . rateToPeer $ p, str "/s"]
+                         , hLimitPercent 10 . padLeft Max . hBox $ [percentView . pProgress $ p, str "%"]
+                         , hLimitPercent 10 . padRight Max . txt . clientName $ p
+                         , hLimitPercent 10 . padRight Max . lockView . isEncrypted $ p
+                         , hLimitPercent 10 . padRight Max . incView . isIncoming $ p
+                         ]
+    lockView v = str $ if v then "Yes" else "No"
+    incView v = str $ if v then "Yes" else "No"
 
 singleHeader :: Torrent -> Widget String
 singleHeader torrent = vBox [
