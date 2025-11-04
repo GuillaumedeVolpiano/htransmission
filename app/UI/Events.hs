@@ -83,7 +83,7 @@ switchView :: View -> EventM n AppState ()
 switchView view = do
   csVar <- gets T.clientState
   liftIO . runEff . runConcurrent . atomically $ modifyTVar' csVar (\s -> s{T.curView = view})
-  modify (\a -> a{T.view=view})
+  modify (\a -> a{T.view=view, mainOffset = 0, mainCursor = 0 })
   updateView
 
 menuOnOff :: Menu -> EventM n AppState ()
@@ -97,8 +97,8 @@ menuOff = do
   curView <- gets T.view
   curMenu <- gets visibleMenu
   case curView of
-    SingleTorrent _ v _ -> modify (\s -> s{visibleMenu = NoMenu, T.view = v})
-    _ -> unless (curMenu == NoMenu) $ modify (\s -> s{visibleMenu = NoMenu})
+    SingleTorrent _ v _ -> modify (\s -> s{visibleMenu = NoMenu, T.view = v, menuCursor = 0})
+    _ -> unless (curMenu == NoMenu) $ modify (\s -> s{visibleMenu = NoMenu, menuCursor = 0})
 
 cursorDown :: EventM n AppState ()
 cursorDown = do
@@ -227,7 +227,7 @@ setSortKey = do
   let reversed' = if sk == curSk then not reversed else reversed
   torrents' <- sortTorrents curSk reversed' <$> gets T.torrents
   liftIO . runEff . runConcurrent . atomically . modifyTVar' csVar $ (\s -> s{T.sortKey = sk, T.reverseSort = reversed'})
-  modify (\s -> s{visibleMenu = NoMenu, T.torrents = torrents'})
+  modify (\s -> s{visibleMenu = NoMenu, T.torrents = torrents', menuCursor = 0})
 
 reverseSort :: EventM n AppState ()
 reverseSort = do

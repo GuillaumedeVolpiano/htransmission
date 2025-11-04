@@ -11,7 +11,10 @@ where
 import           Data.Text (Text)
 
 mainTorrents :: [Text]
-mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio", "totalSize", "peersConnected", "webseeds", "dateCreated", "status", "percentDone", "labels", "error", "id", "files", "downloadDir", "percentComplete", "peers", "addedDate", "activityDate", "hashString", "isPrivate", "comment", "errorString"]
+mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio"
+  , "totalSize", "peersConnected", "webseeds", "dateCreated", "status", "percentDone", "labels", "error", "id"
+  , "files", "downloadDir", "percentComplete", "peers", "addedDate", "activityDate", "hashString", "isPrivate"
+  , "comment", "errorString", "trackers"]
 
 basicSession :: [Text]
 basicSession = ["speed-limit-down-enabled", "speed-limit-down", "speed-limit-up-enabled", "speed-limit-up"]

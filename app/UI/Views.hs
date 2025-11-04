@@ -309,7 +309,9 @@ singleTorrentPeersView torrent = str "  " <=> vBox (str " " : hBox [
                                                                     . length . fromJust . peers $ torrent
                                                                   , hLimitPercent 10 . padLeft Max . str $ "DL"
                                                                   , hLimitPercent 10 . padLeft Max . str $ "UL"
+                                                                  , str "   " 
                                                                   , hLimitPercent 10 . padLeft Max . str $ "%"
+                                                                  , str "   "
                                                                   , hLimitPercent 10 . padRight Max . str $ "Client"
                                                                   , hLimitPercent 10 . padRight Max . str $ "Enc"
                                                                   , hLimitPercent 10 . padRight Max . str $ "In"
@@ -320,8 +322,10 @@ singleTorrentPeersView torrent = str "  " <=> vBox (str " " : hBox [
                          , hLimitPercent 30 . padRight Max . txt . address $ p 
                          , hLimitPercent 10 . padLeft Max . hBox $ [sizeView . rateToClient $ p, str "/s"]
                          , hLimitPercent 10 . padLeft Max . hBox $ [sizeView . rateToPeer $ p, str "/s"]
-                         , hLimitPercent 10 . padLeft Max . hBox $ [percentView . pProgress $ p, str "%"]
-                         , hLimitPercent 10 . padRight Max . txt . clientName $ p
+                         , str "   "
+                         , hLimitPercent 10 . percentView . pProgress $ p
+                         , str "   "
+                         , hLimitPercent 10 . padRight Max . hBox $ [str "   ", txt . clientName $ p]
                          , hLimitPercent 10 . padRight Max . lockView . isEncrypted $ p
                          , hLimitPercent 10 . padRight Max . incView . isIncoming $ p
                          ]
