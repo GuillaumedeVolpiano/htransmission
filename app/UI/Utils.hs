@@ -22,7 +22,7 @@ import           UI.Attrs                 (cursorAttr)
 import           UI.Types                 (AppState,
                                            DialogContent (Alert, Remove),
                                            Menu (NoMenu),
-                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched),
+                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched, Active),
                                            getView, mainCursor, menuCursor,
                                            visibleMenu)
 import           Utils                    (sortTorrents)
@@ -39,6 +39,7 @@ sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filte
       Inactive          -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
       Error             -> (/= Just TT.OK) . errorCode
       Unmatched         -> flip member unmatched . fromJust . toId
+      Active            -> (\t -> rateDownload t > Just 0 || rateUpload t > Just 0)
       SingleTorrent {}  -> undefined
 
 actionFromView :: View -> Action

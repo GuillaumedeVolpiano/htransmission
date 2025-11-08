@@ -44,12 +44,13 @@ import           Transmission.RPC.Session        (Session, SessionStats,
 import           Transmission.RPC.Torrent        (Torrent)
 import           Types                           (Req, Sort (Name))
 
-data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched 
-          | SingleTorrent Int View Int
+data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched
+          | SingleTorrent Int View Int | Active
   deriving (Eq, Ord, Show)
 
 data KeyEvent =
-                CloseMenuEvent
+                ActiveViewEvent
+              | CloseMenuEvent
               | CompleteViewEvent
               | CursorDownEvent
               | CursorUpEvent
