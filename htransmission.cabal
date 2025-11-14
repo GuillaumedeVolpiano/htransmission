@@ -68,12 +68,12 @@ executable htransmission
   -- Modules included in this executable, other than Main.
   other-modules:
     Constants
-    Effectful.Client
+    Effectful.UIBUS
     Effectful.Timer
     Effectful.Matcher
-    Effectful.Types
     Types
     UI.Attrs
+    UI.Client
     UI.Constants
     UI.Events
     UI.KeyEvents
