@@ -1,36 +1,44 @@
 {-# LANGUAGE GADTs #-}
-module UI.Types (View(..),
-                KeyEvent(..),
-                AppState(AppState),
-                Events(..),
-                view,
-                torrents,
-                session,
-                sessionStats,
-                keyBindings,
-                keyHandler,
-                visibleMenu,
-                menuCursor,
-                mainCursor,
-                sortKey,
-                reverseSort,
-                selected,
-                mainOffset,
-                mainVisibleHeight,
-                visibleWidth,
-                mainContentHeight,
-                visibleDialog,
-                request,
-                Menu(..),
-                newState,
-                DialogContent (..),
-                getView,
-                ClientState,
-                curView,
-                clientState,
-                newClientState
+module Types
+  (
+  PathMap,
+  Action(..),
+  Sort(..),
+  Req(..),
+  UpdateEvent(..),
+  View(..),
+  KeyEvent(..),
+  AppState(AppState),
+  Events(..),
+  view,
+  torrents,
+  session,
+  sessionStats,
+  keyBindings,
+  keyHandler,
+  visibleMenu,
+  menuCursor,
+  mainCursor,
+  sortKey,
+  reverseSort,
+  selected,
+  mainOffset,
+  mainVisibleHeight,
+  visibleWidth,
+  mainContentHeight,
+  visibleDialog,
+  request,
+  Menu(..),
+  newState,
+  DialogContent (..),
+  getView,
+  ClientState,
+  curView,
+  clientState,
+  newClientState
   )
 where
+import           Transmission.RPC.Types (Label)
 import           Brick                           (EventM)
 import           Brick.Keybindings               (KeyConfig)
 import           Brick.Keybindings.KeyDispatcher (KeyDispatcher)
@@ -42,7 +50,21 @@ import           Transmission.RPC.Session        (Session, SessionStats,
                                                   emptySession,
                                                   emptySessionStats)
 import           Transmission.RPC.Torrent        (Torrent)
-import           Types                           (Req, Sort (Name))
+
+data Action = Global | Matched deriving (Eq, Ord)
+
+type PathMap = FilePath -> FilePath
+
+data Sort = Name | PercentComplete | Downloaded | DownloadSpeed | Uploaded | UploadSpeed | ETA | Ratio | TotalSize
+  | Peers | Seeds | DateAdded | Labels deriving (Enum, Eq, Ord)
+
+data UpdateEvent where
+  ReqEvent :: Req -> UpdateEvent
+  TimerMinor :: UpdateEvent
+  TimerMajor :: UpdateEvent
+  deriving (Show, Eq)
+
+data Req = Get | Delete ([Int], Bool) | Add [(FilePath, FilePath, [Label])] deriving (Eq, Ord, Show)
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched
           | SingleTorrent Int View Int | Active

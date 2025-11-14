@@ -17,14 +17,13 @@ import           Transmission.RPC.Torrent (Torrent, errorCode, progress,
                                            toId)
 import qualified Transmission.RPC.Types   as TT (Error (OK),
                                                  Status (Downloading, Seeding, Stopped))
-import           Types                    (Action (Global, Matched), Sort)
-import           UI.Attrs                 (cursorAttr)
-import           UI.Types                 (AppState,
+import           Types                    (Action (Global, Matched), Sort, AppState,
                                            DialogContent (Alert, Remove),
                                            Menu (NoMenu),
                                            View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched, Active),
                                            getView, mainCursor, menuCursor,
                                            visibleMenu)
+import           UI.Attrs                 (cursorAttr)
 import           Utils                    (sortTorrents)
 
 sel :: View -> IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]

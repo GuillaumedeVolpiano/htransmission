@@ -41,14 +41,14 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
                                             tAnnounce, toId, totalSize,
                                             trackers, uploadedEver, webseeds,
                                             webseedsSendingToUs)
-import           UI.Attrs                  (selectedAttr)
-import qualified UI.Types                  as UT (torrents)
-import           UI.Types                  (AppState,
+import qualified Types                     as UT (torrents)
+import           Types                     (AppState,
                                             Menu (NoMenu, Single, Sort),
                                             View (..), mainCursor, mainOffset,
                                             mainVisibleHeight, menuCursor,
                                             selected, session, sessionStats,
                                             view, visibleDialog, visibleMenu)
+import           UI.Attrs                  (selectedAttr)
 import           UI.Utils                  (highlightRow)
 
 mkView :: AppState -> [Widget String]
@@ -337,8 +337,8 @@ singleTorrentPeersView torrent = str "  " <=> vBox (str " " : hBox [
     incView v = str $ if v then "Yes" else "No"
 
 singleTorrentTrackersView :: Torrent -> Widget String
-singleTorrentTrackersView torrent = hLimitPercent 90 $ str "  " 
-                                                     <=> vBox (str " " 
+singleTorrentTrackersView torrent = hLimitPercent 90 $ str "  "
+                                                     <=> vBox (str " "
                                                           : hBox [
                                                                   str "Trackers: "
                                                                   , str .

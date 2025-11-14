@@ -4,10 +4,10 @@ module UI.Constants (
 
 where
 import           Brick     (App (App, appAttrMap, appChooseCursor, appDraw, appHandleEvent, appStartEvent))
+import           Types     (AppState, Events)
 import           UI.Attrs  (attrMap)
 import qualified UI.Events as UE (appStartEvent)
 import           UI.Events (eventHandler)
-import           UI.Types  (AppState, Events)
 import qualified UI.Utils  as UU (appChooseCursor)
 import           UI.Views  (mkView)
 

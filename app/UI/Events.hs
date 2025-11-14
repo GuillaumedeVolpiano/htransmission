@@ -41,15 +41,16 @@ import           Effectful.Concurrent.STM (atomically, modifyTVar', readTVarIO,
 import           Graphics.Vty             (Event (EvKey, EvResize),
                                            displayBounds, outputIface)
 import           Transmission.RPC.Torrent (toId)
-import           Types                    (Req (Delete, Get))
-import qualified UI.Types                 as T (clientState, curView,
+import qualified Types                    as T (clientState, curView,
                                                 keyHandler, request,
                                                 reverseSort, session,
                                                 sessionStats, sortKey, torrents,
                                                 view)
-import           UI.Types                 (AppState (visibleDialog),
+import           Types                    (AppState (visibleDialog),
                                            DialogContent (Alert, Remove),
-                                           Events (..), Menu (NoMenu, Sort, Single),
+                                           Events (..),
+                                           Menu (NoMenu, Single, Sort),
+                                           Req (Delete, Get),
                                            View (SingleTorrent), mainCursor,
                                            mainOffset, mainVisibleHeight,
                                            menuCursor, selected, visibleMenu,
@@ -113,7 +114,7 @@ cursorLeft = do
       modify (\s -> s{T.view = SingleTorrent (idx - 1) v pos})
     _ -> pure ()
 
-cursorRight :: EventM n AppState ()
+cursorRight :: EventM n AppState ()
 cursorRight = do
   view <- gets T.view
   maxIdx <- (-1 +) . length <$> gets T.torrents
@@ -283,8 +284,8 @@ removeTorrent removeData = do
                                    else Remove (toRemove, removeData)
   modify (\s -> s {visibleDialog = Just (mkDialog theDialog width)})
 
-tabSwitch :: EventM n AppState ()
-tabSwitch = do
+tabSwitch :: EventM n AppState ()
+tabSwitch = do
   vd <- gets visibleDialog
   case vd of
     Nothing -> pure ()

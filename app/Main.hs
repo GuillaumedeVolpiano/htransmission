@@ -9,17 +9,17 @@ import           Brick.BChan                (newBChan)
 import           Control.Monad              (void)
 import qualified Data.Text.IO               as T (putStrLn)
 import           Effectful                  (runEff)
-import           Effectful.Client           (startClient)
 import           Effectful.Concurrent       (runConcurrent)
-import           Effectful.Concurrent.STM   (newTChanIO, newTVarIO, newTChan, atomically)
+import           Effectful.Concurrent.STM   (atomically, newTChan, newTChanIO,
+                                             newTVarIO)
 import           Effectful.FileSystem       (runFileSystem)
 import           Effectful.Log              (LogLevel (LogTrace), runLog)
-import           Effectful.Matcher          (startMatcher)
+import           Effectful.Matcher          (runMatcher)
 import           Effectful.Prim.IORef       (runPrim)
 import           Effectful.Reader.Static    (runReader)
 import           Effectful.Time             (runTime)
-import           Effectful.Timer            (startTimer)
-import           Effectful.Types            (newClient, newMatcher)
+import           Effectful.Timer            (runTimer)
+import           Effectful.UIBUS            (runUIBUS)
 import           Effectful.Unix             (runUnix)
 import           Effectful.Wreq             (runWreq)
 import           Graphics.Vty               (defaultConfig)
@@ -30,9 +30,10 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              progDesc, short, strOption, value,
                                              (<**>))
 import           Transmission.RPC.Client    (fromUrl)
+import           Types                      (newClientState, newState)
+import           UI.Client                  (startClient)
 import           UI.Constants
 import           UI.KeyEvents               (dispatcher, keyConfig)
-import           UI.Types                   (newState, newClientState)
 
 newtype Args = Args {
                  getHost :: String
@@ -48,7 +49,6 @@ main = do
   (Args url) <- execParser . info (args <**> helper) $ (fullDesc <> progDesc "A command line to communicate with transmission-daemon")
   chan <- newBChan 10
   timerChan <- runEff . runConcurrent $ atomically newTChan
-  runEff . runPrim . runConcurrent $ startTimer timerChan
   (clientState, matcherChan, matcherInVar, matcherOutVar, req) <- runEff . runConcurrent $ do
     cs <- newTVarIO newClientState
     mc <- newTChanIO
@@ -58,11 +58,9 @@ main = do
     pure (cs, mc, miv, mov, r)
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
-  let matcher = newMatcher matcherChan matcherOutVar matcherInVar
-      localClient = newClient matcherChan matcherOutVar matcherInVar timerChan clientState req chan
-  runEff . runConcurrent .runUnix $ startMatcher matcher
   (eventLog, _) <- withSimpleTextLogger $ \stl -> runEff .runConcurrent . runReader client . runWreq
-    . runPrim . runLog "Client" stl LogTrace . runTime . runUnix . runFileSystem $ startClient localClient
-  let appState = newState keyConfig dispatcher clientState req 
+    . runPrim . runLog "Client" stl LogTrace . runTime . runUnix . runFileSystem
+    . runTimer timerChan 5 1000000 . runMatcher matcherChan matcherOutVar matcherInVar . runUIBUS clientState req chan $ startClient
+  let appState = newState keyConfig dispatcher clientState req
   void $ customMain vty (mkVty defaultConfig) (Just chan) app appState
   T.putStrLn eventLog

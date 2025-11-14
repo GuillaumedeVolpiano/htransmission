@@ -19,17 +19,18 @@ import           Brick.Keybindings.KeyEvents     (keyEvents)
 import           Brick.Keybindings.Pretty        (ppBinding)
 import           Data.Maybe                      (fromJust)
 import qualified Data.Text                       as T (unpack)
-import           Graphics.Vty                    (Key (KChar, KDown, KEnter, KFun, KLeft, KPageDown, KPageUp, KRight, KUp, KEsc))
+import           Graphics.Vty                    (Key (KChar, KDown, KEnter, KEsc, KFun, KLeft, KPageDown, KPageUp, KRight, KUp))
+import           Types                           (AppState, KeyEvent (..),
+                                                  Menu (Sort), View (..))
 import           UI.Events                       (cursorDown, cursorLeft,
                                                   cursorRight, cursorTrigger,
-                                                  cursorUp, menuOnOff, pageDown,
-                                                  pageUp, removeTorrent,
-                                                  reverseSort, selectAll,
-                                                  selectDown, selectNone,
-                                                  selectOne, selectUp,
-                                                  switchView, tabSwitch, menuOff)
-import           UI.Types                        (AppState, KeyEvent (..),
-                                                  Menu (Sort), View (..))
+                                                  cursorUp, menuOff, menuOnOff,
+                                                  pageDown, pageUp,
+                                                  removeTorrent, reverseSort,
+                                                  selectAll, selectDown,
+                                                  selectNone, selectOne,
+                                                  selectUp, switchView,
+                                                  tabSwitch)
 
 allKeyEvents :: KeyEvents KeyEvent
 allKeyEvents = keyEvents [
