@@ -1,56 +1,45 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TupleSections    #-}
-{-# LANGUAGE TypeOperators    #-}
 
 module Utils
-  (extractPrunable
-  , isRoot
-  , replaceRoot
-  , mkPathMap
+  ( mkPathMap
   , sortTorrents
+  , buildFilesPath
+  , getFileNodes
   )
 where
-import qualified Constants                as C (labels)
-import           Control.Monad            (forM)
-import           Data.Function            (on)
-import           Data.List                (intersect, isPrefixOf, sortBy)
-import           Data.Maybe               (fromJust, isNothing)
-import           Effectful                (Eff, (:>))
-import           Effectful.Unix           (Unix, fileID, isDirectory,
-                                           listDirectory)
-import           System.FilePath.Posix    (joinPath, normalise,
-                                           splitDirectories, (</>))
-import           System.Posix             (FileID)
-import           Transmission.RPC.Torrent (Torrent, addedDate, downloadDir,
-                                           downloadedEver, eta, fName, files,
-                                           labels, name, peersConnected,
-                                           percentComplete, progress,
-                                           rateDownload, rateUpload, ratio,
-                                           totalSize, uploadedEver, webseeds, toId)
-import           Types                    (PathMap, Sort (..))
+import           Data.Function                (on, (&))
+import           Data.HashMap.Strict          (HashMap)
+import qualified Data.HashMap.Strict          as HM (insert)
+import           Data.HashSet                 (HashSet)
+import qualified Data.HashSet                 as HS (insert)
+import           Data.List                    (sortBy, isPrefixOf)
+import           Data.Maybe                   (fromJust)
+import qualified Streamly.Data.Fold           as F (foldl')
+import           Streamly.Data.Fold           (Fold)
+import qualified Streamly.Data.Stream         as S (fold, fromList, unfoldrM, catMaybes)
+import qualified Streamly.Data.Stream.Prelude as S (maxThreads, parConcatMap)
+import           Streamly.Data.Stream.Prelude (Stream)
+import           System.Directory             (listDirectory)
+import           System.FilePath.Posix        ((</>), normalise, splitDirectories, joinPath)
+import           System.Posix                 (deviceID, fileID, getFileStatus,
+                                               isDirectory, FileStatus)
+import           Transmission.RPC.Torrent     (Torrent, addedDate, downloadDir,
+                                               downloadedEver, eta, fName,
+                                               files, labels, name,
+                                               peersConnected, percentComplete, rateDownload,
+                                               rateUpload, ratio, toId,
+                                               totalSize, uploadedEver,
+                                               webseeds)
+import           Types                        (PathMap, Sort (..), UFID (UFID))
+import Control.Exception (IOException, try)
 
-extractPrunable :: (Unix :> es) => [(FilePath, FilePath)] -> PathMap -> [Torrent] -> Eff es  [Torrent]
-extractPrunable arrs pathMap tors = do
-  arrIDs <- forM arrs (\(root, full) -> (root, ) <$> (getAllPaths full >>= getFileNodes))
-  torIDs <- forM (filter (\t -> ((==100) . fromJust . progress $ t) && (not . null . intersect C.labels . fromJust . labels $ t)) tors) (\t -> (t,) <$> (getFileNodes . buildFilesPath pathMap) t)
-  pure $ sortBy (\a b -> compare (name a) (name b)) . map fst . filter (not . referenced pathMap arrIDs) $ torIDs
 
-getFileNodes :: (Unix :> es) => [FilePath] -> Eff es [FileID]
-getFileNodes fps = forM fps fileID
-
-getAllPaths :: (Unix :> es) => FilePath -> Eff es [FilePath]
-getAllPaths fp = do
-  isDir <- isDirectory fp
-  if isDir then listDirectory fp >>= (concat <$>) . mapM (getAllPaths . (fp </>))
-        else pure [fp]
-
-referenced :: PathMap -> [(FilePath, [FileID])] -> (Torrent, [FileID]) -> Bool
-referenced pathMap arrs (tor, inodes) = not . null . intersect inodes . concatMap snd . filter (isRootIf . fst) $ arrs
+mkPathMap :: [(FilePath, FilePath)] -> FilePath -> FilePath
+mkPathMap pm fp = foldr remapIfMatch fp pm
   where
-    maybeFP = downloadDir tor
-    isRootIf fp
-      | isNothing maybeFP = False
-      | otherwise = isRoot fp . pathMap . fromJust $ maybeFP
+    remapIfMatch (from, to) path
+      | isRoot from path = replaceRoot from to path
+      | otherwise = path
 
 isRoot :: FilePath -> FilePath -> Bool
 isRoot root fp = (splitDirectories . normalise $ root) `isPrefixOf` (splitDirectories . normalise $ fp)
@@ -61,14 +50,7 @@ replaceRoot from to toMod = normalise . joinPath $ splitNormTo ++ drop (length s
     splitNormFrom = splitDirectories . normalise $ from
     splitNormTo = splitDirectories . normalise $ to
     splitNormMod = splitDirectories . normalise $ toMod
-
-mkPathMap :: [(FilePath, FilePath)] -> FilePath -> FilePath
-mkPathMap pm fp = foldr remapIfMatch fp pm
-  where
-    remapIfMatch (from, to) path
-      | isRoot from path = replaceRoot from to path
-      | otherwise = path
-
+ 
 buildFilesPath :: PathMap -> Torrent -> [FilePath]
 buildFilesPath pathMap torrent = map (dir </>) fns
   where
@@ -77,7 +59,7 @@ buildFilesPath pathMap torrent = map (dir </>) fns
 
 sortTorrents :: Sort -> Bool -> [Torrent] -> [Torrent]
 sortTorrents sk reversed = rev . sortBy (key <> (compare `on` (fromJust . toId)))
-  where 
+  where
     rev = if reversed  then reverse else id
     key = case sk of
                 Name            -> compare `on` name
@@ -93,3 +75,36 @@ sortTorrents sk reversed = rev . sortBy (key <> (compare `on` (fromJust . toId))
                 Seeds           -> compare `on` length . webseeds
                 DateAdded       -> compare `on` addedDate
                 Labels          -> compare `on` labels
+
+getFileNodes :: Int -> [FilePath] -> IO (HashSet UFID, HashMap FilePath UFID)
+getFileNodes mt arrs = S.fromList arrs & S.parConcatMap (S.maxThreads mt) getAllPairs & S.fold foldFileNodesPairs
+
+getFileNodePair :: FilePath -> IO (Maybe (FilePath, UFID))
+getFileNodePair fp = do
+      es <- try (getFileStatus fp) :: IO (Either IOException FileStatus)
+      case es of
+        Left _ -> pure Nothing
+        Right s -> do
+          let i = fileID s
+              d = deviceID s
+          pure . Just $ (fp, UFID (i, d))
+
+foldFileNodesPairs :: Monad m => Fold m (FilePath, UFID) (HashSet UFID, HashMap FilePath UFID)
+foldFileNodesPairs = F.foldl' (\(fis, fpm) (fp, fid) -> (HS.insert fid fis, HM.insert fp fid fpm)) mempty
+
+getAllPairs :: FilePath -> Stream IO (FilePath, UFID)
+getAllPairs fp = S.unfoldrM getCurPairs [fp] & S.catMaybes 
+  where
+    getCurPairs [] = pure Nothing
+    getCurPairs (f:fps) = do
+      es <- try (getFileStatus f) :: IO (Either IOException FileStatus)
+      case es of
+        Left _ -> getCurPairs fps
+        Right s -> do
+          if isDirectory s then do
+                              names <- listDirectory f
+                              let children = map (f </>) names
+                              getCurPairs (children ++ fps)
+                            else do
+                              pair <- getFileNodePair f
+                              pure . Just $ (pair, fps)

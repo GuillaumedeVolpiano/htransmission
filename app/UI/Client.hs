@@ -5,80 +5,74 @@ module UI.Client (
                         startClient)
 where
 import           Constants                (basicSession, mainTorrents)
-import           Control.Monad            (forever, void, when)
+import           Control.Monad            (forever, void)
+import           Data.IntSet              (IntSet)
+import qualified Data.IntSet              as IS (fromList, toList)
 import           Data.Maybe               (fromJust)
 import qualified Data.Text                as T (pack)
 import           Effectful                (Eff, (:>))
+import           Effectful.Client         (Client, notifyUI,
+                                           readCurrentTorrents, readRPC,
+                                           writeCurrentTorrents)
+import qualified Effectful.Client         as C (curView, reverseSort, sortKey)
 import           Effectful.Concurrent     (Concurrent, forkIO)
+import           Effectful.Concurrent.STM (atomically, newEmptyTMVarIO,
+                                           putTMVar, readTMVar)
 import           Effectful.FileSystem     (FileSystem)
 import           Effectful.Log            (Log, logInfo_)
-import           Effectful.Matcher        (Matcher, matcher, notifyNewUpdate,
-                                           readMatcher, readTorrents,
-                                           writeTorrents)
 import           Effectful.Prim           (Prim)
-import           Effectful.Reader.Static  (Reader)
 import           Effectful.Time           (Time)
-import           Effectful.Timer          (Timer, tick)
-import           Effectful.UIBUS          (UIBUS, awaitEvent, notifyUI,
-                                           readUIState)
-import           Effectful.Unix           (Unix)
 import           Effectful.Wreq           (Wreq)
+import qualified Transmission.RPC.Client  as TT (Client)
 import           Transmission.RPC.Client  (addTorrent, deleteTorrent,
                                            getSession, getTorrents,
                                            sessionStats)
 import           Transmission.RPC.Session (Session, SessionStats)
-import           Transmission.RPC.Torrent
-import qualified Transmission.RPC.Types   as TT (Client)
+import           Transmission.RPC.Torrent (Torrent, toId)
 import           Transmission.RPC.Types   (ID (ID), IDs (IDs), Label,
                                            TorrentRef (Path))
-import qualified Types                    as UT (reverseSort, sortKey)
-import           Types                    (Events (Updated), Req (..),
-                                           UpdateEvent (..), curView)
+import           Types                    (Events (Updated), RPCPayload (..),
+                                           RPCRequest (..))
 import           UI.Utils                 (sel)
 
-startClient :: (Reader TT.Client :> es, UIBUS :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es, Timer :> es, Matcher :> es)
+startClient :: (TT.Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, Client :> es)
             => Eff es ()
 startClient = do
-  tick
-  matcher
-  void . forkIO $ forever $ do
-    event <- awaitEvent
-    torrents <- readTorrents
-    clientState <- readUIState
-    case event of
-      (ReqEvent req) -> case req of
-          Get -> pure ()
-          Delete tors@(torIds, deleteData) -> do
-            logInfo_ (T.pack ("Deleting torrents " ++ show tors))
-            deleteTorrent (IDs . map ID $ torIds) deleteData Nothing
-          Add tors -> addElements tors
-      _ -> pure ()
-    let isMajor = case event of
-                    TimerMajor -> True
-                    _          -> False
-    (torrents', sesh, seshStats) <- getElements isMajor torrents
-    when isMajor $ do
-      notifyNewUpdate isMajor
-      writeTorrents torrents'
-    unmatched <- readMatcher
-    let view = curView clientState
-        sortKey = UT.sortKey clientState
-        reverseSort = UT.reverseSort clientState
-        torrents'' = sel view unmatched sortKey reverseSort torrents'
-    notifyUI (Updated torrents'' sesh seshStats)
+  void . forkIO . forever $ do
+    req <- readRPC
+    let outChan = chan req
+    tl <- case payload req of
+            TimerMajor -> pure Nothing
+            TimerMinor -> Just <$> readCurrentTorrents
+            Get torList -> pure torList
+            Delete tors@(torIds, deleteData) -> do
+              logInfo_ (T.pack ("Deleting torrents " ++ show tors))
+              deleteTorrent (IDs . map ID . IS.toList $ torIds) deleteData Nothing
+              pure Nothing
+            Add tors -> addElements tors >> pure Nothing
+    (torrents', sesh, seshStats) <- getElements tl
+    broadcaster <- newEmptyTMVarIO
+    atomically $ do
+      putTMVar outChan (torrents', broadcaster)
+    unmatched <- atomically $ do
+      readTMVar broadcaster
+    view <- C.curView
+    sortKey <- C.sortKey
+    reverseSort <- C.reverseSort
+    let torrents'' = sel view unmatched sortKey reverseSort torrents'
+    writeCurrentTorrents . IS.fromList . map (fromJust . toId) $ torrents''
+    notifyUI (Types.Updated torrents'' sesh seshStats)
 
-getElements :: (Reader TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es) =>
-    Bool -> [Torrent] -> Eff es ([Torrent], Session, SessionStats)
-getElements isMajor torrents = do
-    let tids = if isMajor then Nothing else Just . IDs  . map (ID . fromJust . toId) $ torrents
+getElements :: (TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es) =>
+    Maybe IntSet -> Eff es ([Torrent], Session, SessionStats)
+getElements torrents = do
+    let tids = IDs . map ID . IS.toList <$> torrents
     torrents' <- getTorrents tids (Just mainTorrents) Nothing
     sesh <- getSession (Just basicSession) Nothing
     seshStats <- sessionStats Nothing
     pure (torrents', sesh, seshStats)
 
-addElements :: (Reader TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, Unix :> es, FileSystem :> es) =>
+addElements :: (TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
   [(FilePath, FilePath, [Label])]-> Eff es ()
 addElements torIds = do
   mapM_ ((\(t, d, l) -> addTorrent t Nothing d Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing l Nothing) . (\(a, b, c) -> (Path a, Just b, Just c))) torIds
-
-

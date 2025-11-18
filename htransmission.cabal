@@ -62,23 +62,29 @@ library
   import:           warnings
   exposed-modules:
     Constants
-    Effectful.Matcher
-    Effectful.Timer
-    Effectful.UIBUS
+    Effectful.Client
+    Streamly.Matcher
+    Streamly.Generators
     Types
     Utils
 
   build-depends:
-    , base              ^>=4.21.0.0
+    , base                  ^>=4.21.0.0
     , brick                 ^>=2.10
-    , containers        ^>=0.7
-    , effectful         ^>=2.5.1.0
-    , effectful-core    ^>=2.5.1.0
-    , effectful-unix    ^>=0.1.0.0
+    , containers            ^>=0.7
+    , directory             ^>=1.3.9.0
+    , effectful             ^>=2.5.1.0
     , filepath              ^>=1.5.4.0
-    , text              ^>=2.1.2
-    , transmission-rpc  ^>=0.1.0.0
-    , unix              ^>=2.8.6.0
+    , hashable              ^>=1.4.7.0
+    , stm                   ^>=2.5.3.1
+    , streamly              ^>=0.11.0
+    , streamly-core         ^>=0.3.0
+    , streamly-fsevents     ^>=0.1.0
+    , text                  ^>=2.1.2
+    , transmission-rpc      ^>=0.1.0.0
+    , unix                  ^>=2.8.6.0
+    , unordered-containers  ^>=0.2.20
+    , vector                ^>=0.13.2.0
 
   hs-source-dirs:   src
   default-language: Haskell2010
@@ -115,7 +121,6 @@ executable htransmission
     , effectful             ^>=2.5.1.0
     , effectful-core        ^>=2.5.1.0
     , effectful-th          ^>=1.0.0.3
-    , effectful-unix        ^>=0.1.0.0
     , filepath              ^>=1.5.4.0
     , htransmission
     , http-client           ^>=0.7.1.9
@@ -125,10 +130,12 @@ executable htransmission
     , monad-time-effectful  ^>=1.0.0.0
     , optparse-applicative  ^>=0.18.1.0
     , stm                   ^>=2.5.3.1
+    , streamly-core         ^>=0.3.0
     , text                  ^>=2.1.2
     , time                  ^>=1.14
     , transmission-rpc      ^>=0.1.0.0
     , unix                  ^>=2.8.6.0
+    , vector                ^>=0.13.2.0
     , vty                   ^>=6.2
     , vty-unix              ^>=0.2.0.0
     , wreq-effectful        ^>=0.1.1.1
@@ -138,4 +145,4 @@ executable htransmission
 
   -- Base language which the package is written in.
   default-language: Haskell2010
-  ghc-options:      -threaded -with-rtsopts=-N4
+  ghc-options:      -threaded -fllvm "-with-rtsopts=-N"

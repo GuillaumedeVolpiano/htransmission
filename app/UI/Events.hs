@@ -50,13 +50,14 @@ import           Types                    (AppState (visibleDialog),
                                            DialogContent (Alert, Remove),
                                            Events (..),
                                            Menu (NoMenu, Single, Sort),
-                                           Req (Delete, Get),
+                                           RPCPayload (Delete, Get),
                                            View (SingleTorrent), mainCursor,
                                            mainOffset, mainVisibleHeight,
                                            menuCursor, selected, visibleMenu,
                                            visibleWidth)
 import           UI.Utils                 (mkDialog)
 import           Utils                    (sortTorrents)
+import qualified Data.IntSet as IS (fromList)
 
 appStartEvent :: EventM String AppState ()
 appStartEvent = do
@@ -78,7 +79,7 @@ eventHandler _ = pure ()
 updateView :: EventM n AppState ()
 updateView = do
   request <- gets T.request
-  liftIO $ runEff . runConcurrent . atomically $ writeTChan request Get
+  liftIO $ runEff . runConcurrent . atomically $ writeTChan request (Get Nothing)
 
 switchView :: View -> EventM n AppState ()
 switchView view = do
@@ -189,7 +190,7 @@ cursorTrigger = do
              Just (Alert _) -> pure ()
              Just (Remove (toRemove, removeData)) -> do
                request <- gets T.request
-               liftIO $ runEff . runConcurrent . atomically $ writeTChan request (Delete (toRemove, removeData))
+               liftIO $ runEff . runConcurrent . atomically $ writeTChan request (Delete (IS.fromList toRemove, removeData))
                modify (\s -> s{selected=mempty})
       modify (\s -> s{visibleDialog = Nothing})
 

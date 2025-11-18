@@ -19,8 +19,8 @@ mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateU
 basicSession :: [Text]
 basicSession = ["speed-limit-down-enabled", "speed-limit-down", "speed-limit-up-enabled", "speed-limit-up"]
 
-arrPaths :: [(FilePath, FilePath)]
-arrPaths = [("/opt/movies", "/opt/movies/finished"), ("/opt/shows", "/opt/shows/finished"), ("/opt/restricted", "/opt/restricted/finished"), ("/opt/calibre", "/opt/calibre/Calibre_Library"), ("/opt/calibre", "/opt/calibre/Comics")]
+arrPaths :: [FilePath]
+arrPaths = ["/opt/movies/finished", "/opt/shows/finished", "/opt/restricted/finished", "/opt/calibre/Calibre_Library", "/opt/calibre/Comics"]
 
 labels :: [Text]
 labels = ["radarr", "sonarr", "cross-seed"]
