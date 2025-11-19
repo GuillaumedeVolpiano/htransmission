@@ -62,7 +62,7 @@ library
   import:           warnings
   exposed-modules:
     Constants
-    Effectful.Client
+    Effectful.RPCClient
     Streamly.Matcher
     Streamly.Generators
     Types

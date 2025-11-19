@@ -1,26 +1,35 @@
+{-# LANGUAGE GADTs             #-}
+{-# LANGUAGE OverloadedStrings #-}
 module UI.Utils
   (sel
   , actionFromView
   , appChooseCursor
   , highlightRow
-  , mkDialog)
+  , mkDialog
+  , withBrickLogger)
 where
 
 import           Brick                    (CursorLocation (CursorLocation, cursorLocation, cursorLocationName, cursorLocationVisible),
                                            Location (Location), Widget, str,
                                            txt, withAttr)
+import           Brick.BChan              (BChan, writeBChan)
 import           Brick.Widgets.Dialog     (Dialog, dialog)
 import           Data.IntSet              (IntSet, member)
 import           Data.Maybe               (fromJust, fromMaybe)
+import           Effectful                (MonadUnliftIO, withRunInIO)
+import           Effectful.Log            (Logger, mkLogger, showLogMessage)
+import           Log.Internal.Logger      (withLogger)
 import           Transmission.RPC.Torrent (Torrent, errorCode, progress,
                                            rateDownload, rateUpload, status,
                                            toId)
 import qualified Transmission.RPC.Types   as TT (Error (OK),
                                                  Status (Downloading, Seeding, Stopped))
-import           Types                    (Action (Global, Matched), Sort, AppState,
+import           Types                    (Action (Global, Matched), AppState,
                                            DialogContent (Alert, Remove),
-                                           Menu (NoMenu),
-                                           View (Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched, Active),
+                                           Menu (NoMenu), Sort,
+                                           View (Active, Complete, Downloading, Error, Inactive, Log
+                                            , Main, Paused, Seeding, SingleTorrent, Unmatched),
+                                           Events (LogEvent),
                                            getView, mainCursor, menuCursor,
                                            visibleMenu)
 import           UI.Attrs                 (cursorAttr)
@@ -40,6 +49,7 @@ sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filte
       Unmatched         -> flip member unmatched . fromJust . toId
       Active            -> (\t -> rateDownload t > Just 0 || rateUpload t > Just 0)
       SingleTorrent {}  -> undefined
+      Log -> const True
 
 actionFromView :: View -> Action
 actionFromView Unmatched = Matched
@@ -68,3 +78,9 @@ mkDialog (Alert text) = dialog (Just . txt $ text) (Just ("OK", [("OK", "0", Not
 mkDialog r@(Remove (t, _)) = dialog
   (Just . str $ "Are you sure you want to remove " ++ show (length t) ++ " selected torrents")
   (Just ("0", [("No", "0", Nothing), ("Yes", "1", Just r)]))
+
+withBrickLogger :: MonadUnliftIO m => BChan Events -> (Logger -> m r) -> m r
+withBrickLogger chan act = withRunInIO $ \unlift -> do
+  logger <- mkLogger "Brick" $ \msg -> do
+    writeBChan chan . LogEvent $ showLogMessage Nothing msg
+  withLogger logger (unlift . act)

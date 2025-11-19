@@ -16,6 +16,7 @@ import           Data.IntSet               (IntSet, member)
 import           Data.Maybe                (fromJust, fromMaybe, isJust,
                                             isNothing, mapMaybe)
 import           Data.Ratio                ((%))
+import           Data.Text                 (Text)
 import qualified Data.Text                 as T (intercalate, takeWhile)
 import           Data.Time.Clock           (UTCTime (utctDay),
                                             nominalDiffTimeToSeconds)
@@ -44,10 +45,11 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
 import qualified Types                     as UT (torrents)
 import           Types                     (AppState,
                                             Menu (NoMenu, Single, Sort),
-                                            View (..), mainCursor, mainOffset,
-                                            mainVisibleHeight, menuCursor,
-                                            selected, session, sessionStats,
-                                            view, visibleDialog, visibleMenu)
+                                            View (..), clientLog, mainCursor,
+                                            mainOffset, mainVisibleHeight,
+                                            menuCursor, selected, session,
+                                            sessionStats, view, visibleDialog,
+                                            visibleMenu)
 import           UI.Attrs                  (selectedAttr)
 import           UI.Utils                  (highlightRow)
 
@@ -58,6 +60,7 @@ mkView s = pure .
     mainWidget
       | view s == Unmatched = matchedView Unmatched (mainCursor s) (UT.torrents s) (session s)
         (sessionStats s) (selected s) vh (mainOffset s)
+      | view s == Log = logView vh (clientLog s)
       | isJust tid = singleView (fromJust tid) pos (UT.torrents s) (session s) (sessionStats s) vh
       | otherwise = mainView (view s) (mainCursor s) (UT.torrents s) (session s) (sessionStats s) (selected s) vh
         (mainOffset s)
@@ -369,3 +372,7 @@ singleTorrentMenu :: Int -> Int -> Widget n
 singleTorrentMenu mc vh = hLimit 20 (vBox [ hBorder, str " ", hBorder ]
   <=> (vLimit vh . padBottom Max . vBox . highlightRow mc $ [str "Details", str "Files", str "Peers", str "Trackers"])
   <=> vBox [hBorder, str " ", hBorder])
+
+logView :: Int -> [Text] -> Widget n
+logView vh = borderWithLabel (str "Log") . vLimit vh . hLimitPercent 90 . (<=> fill ' ') . vBox 
+  . map (vLimit 1 . (<+> fill ' ') . txt) . reverse . take vh

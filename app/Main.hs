@@ -5,24 +5,26 @@
 module Main where
 
 import           Brick                      (customMain)
-import           Brick.BChan                (newBChan)
+import           Brick.BChan                (newBChan, writeBChan)
 import           Constants                  (arrPaths)
 import           Control.Concurrent         (forkIO, getNumCapabilities)
-import           Control.Concurrent.STM     (newTChanIO, newTVarIO)
-import           Control.Monad              (void)
+import           Control.Concurrent.STM     (atomically, newTChanIO, newTVarIO,
+                                             readTChan, writeTChan)
+import           Control.Monad              (forever, void)
 import           Data.Function              ((&))
 import           Data.IORef                 (newIORef)
+import qualified Data.Text.IO               as T
 import           Effectful                  (runEff)
-import           Effectful.Client           (runClient)
 import           Effectful.Concurrent       (runConcurrent)
 import           Effectful.FileSystem       (runFileSystem)
-import           Effectful.Log              (LogLevel (LogTrace), runLog)
+import           Effectful.Log              (LogLevel (LogTrace), mkLogger,
+                                             runLog, showLogMessage)
 import           Effectful.Prim.IORef       (runPrim)
+import           Effectful.RPCClient        (runRPCClient)
 import           Effectful.Time             (runTime)
 import           Effectful.Wreq             (runWreq)
 import           Graphics.Vty               (defaultConfig)
 import           Graphics.Vty.Platform.Unix (mkVty)
-import           Log.Backend.Text           (withSimpleTextLogger)
 import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              helper, info, long, metavar,
                                              progDesc, short, strOption, value,
@@ -31,9 +33,11 @@ import qualified Streamly.Data.Fold         as F (drain)
 import qualified Streamly.Data.Stream       as S (fold)
 import qualified Streamly.Generators        as S (timer, uiBUS, watcher)
 import qualified Streamly.Matcher           as S (matcher)
+import           System.IO                  (stderr)
 import qualified Transmission.RPC.Client    as TT (runClient)
 import           Transmission.RPC.Client    (fromUrl)
-import           Types                      (Matcher (Matcher), newClientState,
+import           Types                      (Events (LogEvent),
+                                             Matcher (Matcher), newClientState,
                                              newState)
 import           UI.Client                  (startClient)
 import           UI.Constants
@@ -54,11 +58,11 @@ main = do
   (Args url) <- execParser . info (args <**> helper) $ (fullDesc <> progDesc "A command line to communicate with transmission-daemon")
   chan <- newBChan 10
   nc <- getNumCapabilities
-  putStrLn "Generating the list of files in the *arrs folders"
   (ais, aim) <- getFileNodes nc arrPaths
   clientState <- newTVarIO newClientState
   req <- newTChanIO
   pay <- newTChanIO
+  logChan <- newTChanIO
   prunedVar <- newTVarIO mempty
   ais' <- newTVarIO ais
   aim' <- newTVarIO aim
@@ -66,20 +70,20 @@ main = do
   tid <- newTVarIO mempty
   ct <- newIORef mempty
   counter <- newIORef 0
+  logger <- mkLogger "Brick" $ \msg -> do
+    (writeBChan chan . LogEvent $ showLogMessage Nothing msg) >> atomically (writeTChan logChan $ showLogMessage Nothing msg)
   let timerStream = S.timer 5 counter req
       uiStream = S.uiBUS pay req
       watchStream = S.watcher arrPaths
-      reservedThreads = 3 -- matcher, client, UI
+      reservedThreads = 4 -- matcher, client, logger, UI
       wt = max (nc - reservedThreads) 1
       matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
-  putStrLn "Starting the transmission client"
-  void $ withSimpleTextLogger $ \stl -> runEff .runConcurrent . TT.runClient client . runWreq
-    . runPrim . runLog "Client" stl LogTrace . runTime . runFileSystem
-    . runClient req clientState chan ct $ startClient
   let appState = newState keyConfig dispatcher clientState pay
-  putStrLn "Starting the UI"
-  void . forkIO . void $ customMain vty (mkVty defaultConfig) (Just chan) app appState
-  putStrLn "Starting the events Stream"
-  S.matcher matcher [timerStream, uiStream, watchStream] & S.fold F.drain
+  void . forkIO . forever $ atomically (readTChan logChan) >>= T.hPutStrLn stderr
+  void . forkIO $ S.matcher matcher [timerStream, uiStream, watchStream] & S.fold F.drain
+  void $ runEff .runConcurrent . TT.runClient client . runWreq
+    . runPrim . runLog "Client" logger LogTrace . runTime . runFileSystem
+    . runRPCClient req clientState chan ct $ startClient
+  void $ customMain vty (mkVty defaultConfig) (Just chan) app appState

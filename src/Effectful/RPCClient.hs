@@ -3,17 +3,17 @@
 {-# LANGUAGE GADTs            #-}
 {-# LANGUAGE TypeFamilies     #-}
 {-# LANGUAGE TypeOperators    #-}
-module Effectful.Client (
-                          Client
-                        , curView
-                        , sortKey
-                        , reverseSort
-                        , readRPC
-                        , notifyUI
-                        , writeCurrentTorrents
-                        , readCurrentTorrents
-                        , runClient
-                        )
+module Effectful.RPCClient (
+                             RPCClient
+                           , curView
+                           , sortKey
+                           , reverseSort
+                           , readRPC
+                           , notifyUI
+                           , writeCurrentTorrents
+                           , readCurrentTorrents
+                           , runRPCClient
+                           )
 
 where
 
@@ -31,37 +31,37 @@ import qualified Types                     as T (curView, reverseSort, sortKey)
 import           Types                     (ClientState, Events, RPCRequest,
                                             Sort, View)
 
-data Client :: Effect
+data RPCClient :: Effect
 
-type instance DispatchOf Client = Static WithSideEffects
+type instance DispatchOf RPCClient = Static WithSideEffects
 
-data instance StaticRep Client = Client {
+data instance StaticRep RPCClient = RPCClient {
                                           rpcIn :: TChan RPCRequest,
                                           clientState :: TVar ClientState,
                                           uiUpdate :: BChan Events,
                                           currentTorrents :: IORef IntSet
                                         }
 
-curView :: (Concurrent :> es, Client :> es) => Eff es View
+curView :: (Concurrent :> es, RPCClient :> es) => Eff es View
 curView = getStaticRep >>= fmap T.curView . readTVarIO . clientState
 
-sortKey :: (Concurrent :> es, Client :> es) => Eff es Sort
+sortKey :: (Concurrent :> es, RPCClient :> es) => Eff es Sort
 sortKey = getStaticRep >>= fmap T.sortKey . readTVarIO . clientState
 
-reverseSort :: (Concurrent :> es, Client :> es) => Eff es Bool
+reverseSort :: (Concurrent :> es, RPCClient :> es) => Eff es Bool
 reverseSort = getStaticRep >>= fmap T.reverseSort . readTVarIO . clientState
 
-readRPC :: (Concurrent :> es, Client :> es) => Eff es RPCRequest
+readRPC :: (Concurrent :> es, RPCClient :> es) => Eff es RPCRequest
 readRPC = getStaticRep >>= atomically . readTChan . rpcIn
 
-notifyUI :: (Concurrent :> es, Client :> es) => Events -> Eff es ()
+notifyUI :: (Concurrent :> es, RPCClient :> es) => Events -> Eff es ()
 notifyUI ev = getStaticRep >>= unsafeEff_ . flip writeBChan ev . uiUpdate
 
-readCurrentTorrents :: (Prim :> es, Client :> es) => Eff es IntSet
+readCurrentTorrents :: (Prim :> es, RPCClient :> es) => Eff es IntSet
 readCurrentTorrents = getStaticRep >>= readIORef . currentTorrents
 
-writeCurrentTorrents :: (Prim :> es, Client :> es) => IntSet -> Eff es ()
+writeCurrentTorrents :: (Prim :> es, RPCClient :> es) => IntSet -> Eff es ()
 writeCurrentTorrents ct = getStaticRep >>= flip writeIORef ct . currentTorrents
 
-runClient :: (IOE :> es) => TChan RPCRequest -> TVar ClientState -> BChan Events -> IORef IntSet -> Eff (Client : es) a -> Eff es a
-runClient r c u ct = evalStaticRep $ Client r c u ct
+runRPCClient :: (IOE :> es) => TChan RPCRequest -> TVar ClientState -> BChan Events -> IORef IntSet -> Eff (RPCClient : es) a -> Eff es a
+runRPCClient r c u ct = evalStaticRep $ RPCClient r c u ct

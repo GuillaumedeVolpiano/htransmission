@@ -62,7 +62,8 @@ allKeyEvents = keyEvents [
                           ("remove the selected torrents", RemoveSelectedEvent),
                           ("remove the selected torrents and their data", RemoveSelectedWithDataEvent),
                           ("switch the focused button", TabSwitchEvent),
-                          ("active view", ActiveViewEvent)
+                          ("active view", ActiveViewEvent),
+                          ("show the log", LogViewEvent)
                          ]
 
 defaultBindings :: [(KeyEvent, [Binding])]
@@ -94,7 +95,8 @@ defaultBindings = [
                    (RemoveSelectedEvent, [bind (KChar '-')]),
                    (RemoveSelectedWithDataEvent, [meta '-']),
                    (TabSwitchEvent, [bind (KChar '\t')]),
-                   (ActiveViewEvent, [meta 'a'])
+                   (ActiveViewEvent, [meta 'a']),
+                   (LogViewEvent, [ctrl 'l'])
                   ]
 
 keyConfig :: KeyConfig KeyEvent
@@ -129,7 +131,8 @@ handlers = [
             onEvent RemoveSelectedEvent "Remove selected torrents" (removeTorrent False),
             onEvent RemoveSelectedWithDataEvent "Remove selected torrents and their data" (removeTorrent True),
             onEvent TabSwitchEvent "Switch selected button" tabSwitch,
-            onEvent ActiveViewEvent "Switch to the active view" (switchView Active)
+            onEvent ActiveViewEvent "Switch to the active view" (switchView Active),
+            onEvent LogViewEvent "Switch to the log view" (switchView Log)
            ]
 
 dispatcher :: KeyDispatcher KeyEvent (EventM String AppState)

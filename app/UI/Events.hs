@@ -33,6 +33,7 @@ import           Brick.Widgets.Dialog     (dialogButtons, dialogSelection,
 import           Control.Monad            (unless, void, when)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import           Data.IntSet              (delete, insert, member)
+import qualified Data.IntSet              as IS (fromList)
 import qualified Data.IntSet              as S (fromList, toList)
 import           Data.Maybe               (fromJust)
 import           Effectful                (runEff)
@@ -41,7 +42,7 @@ import           Effectful.Concurrent.STM (atomically, modifyTVar', readTVarIO,
 import           Graphics.Vty             (Event (EvKey, EvResize),
                                            displayBounds, outputIface)
 import           Transmission.RPC.Torrent (toId)
-import qualified Types                    as T (clientState, curView,
+import qualified Types                    as T (clientLog, clientState, curView,
                                                 keyHandler, request,
                                                 reverseSort, session,
                                                 sessionStats, sortKey, torrents,
@@ -51,13 +52,12 @@ import           Types                    (AppState (visibleDialog),
                                            Events (..),
                                            Menu (NoMenu, Single, Sort),
                                            RPCPayload (Delete, Get),
-                                           View (SingleTorrent), mainCursor,
-                                           mainOffset, mainVisibleHeight,
-                                           menuCursor, selected, visibleMenu,
-                                           visibleWidth)
+                                           View (Log, SingleTorrent),
+                                           mainCursor, mainOffset,
+                                           mainVisibleHeight, menuCursor,
+                                           selected, visibleMenu, visibleWidth)
 import           UI.Utils                 (mkDialog)
 import           Utils                    (sortTorrents)
-import qualified Data.IntSet as IS (fromList)
 
 appStartEvent :: EventM String AppState ()
 appStartEvent = do
@@ -69,6 +69,8 @@ appStartEvent = do
 eventHandler :: BrickEvent String Events -> EventM String AppState ()
 eventHandler (AppEvent (Updated torrents sesh seshStats)) =
   modify (\a -> a{T.torrents = torrents, T.session = sesh, T.sessionStats = seshStats})
+eventHandler (AppEvent (LogEvent logMessage)) =
+  modify (\a -> a{T.clientLog = logMessage : T.clientLog a})
 eventHandler (VtyEvent (EvKey k mods)) = gets T.keyHandler >>= \kh -> void (handleKey kh k mods)
 eventHandler (VtyEvent (EvResize newWidth newHeight)) = do
   modify (\s -> s{visibleWidth = newWidth, mainVisibleHeight = newHeight - 6
@@ -109,20 +111,40 @@ cursorDown = do
 
 cursorLeft :: EventM n AppState ()
 cursorLeft = do
-  view <- gets T.view
-  case view of
-    SingleTorrent idx v pos -> unless (idx == 0) $ do
-      modify (\s -> s{T.view = SingleTorrent (idx - 1) v pos})
-    _ -> pure ()
+  vd <- gets visibleDialog
+  case vd of
+    Just d -> do
+      let buttons = dialogButtons d
+          focus = getDialogFocus d
+          i = maybe 0 read focus
+          i' = (i - 1) `mod` length buttons
+          d' = setDialogFocus (show i') d
+      modify (\s -> s {visibleDialog = Just d'})
+    Nothing -> do
+      view <- gets T.view
+      case view of
+        SingleTorrent idx v pos -> unless (idx == 0) $ do
+          modify (\s -> s{T.view = SingleTorrent (idx - 1) v pos})
+        _ -> pure ()
 
 cursorRight :: EventM n AppState ()
 cursorRight = do
-  view <- gets T.view
-  maxIdx <- (-1 +) . length <$> gets T.torrents
-  case view of
-    SingleTorrent idx v pos -> unless (idx == maxIdx) $ do
-      modify (\s -> s{T.view = SingleTorrent (idx + 1) v pos})
-    _ -> pure ()
+  vd <- gets visibleDialog
+  case vd of
+    Just d -> do
+      let buttons = dialogButtons d
+          focus = getDialogFocus d
+          i = maybe 0 read focus
+          i' = (i + 1) `mod` length buttons
+          d' = setDialogFocus (show i') d
+      modify (\s -> s {visibleDialog = Just d'})
+    Nothing -> do
+      view <- gets T.view
+      maxIdx <- (-1 +) . length <$> gets T.torrents
+      case view of
+        SingleTorrent idx v pos -> unless (idx == maxIdx) $ do
+          modify (\s -> s{T.view = SingleTorrent (idx + 1) v pos})
+        _ -> pure ()
 
 cursorDownMain :: EventM n AppState ()
 cursorDownMain = do
@@ -170,16 +192,20 @@ cursorTrigger = do
   maybeDialog <- gets visibleDialog
   case maybeDialog of
     Nothing -> do
-     vm <- gets visibleMenu
-     case vm of
-       NoMenu -> viewTorrent
-       Sort   -> setSortKey
-       Single -> do
-         p <- gets menuCursor
-         v <- gets T.view
-         case v of
-           SingleTorrent idx v' _ -> modify (\s -> s{T.view=SingleTorrent idx v' p})
-           _ -> undefined -- Single menu should only be visible in SingleTorrentView
+     view <- gets T.view
+     case view of
+       Log -> pure ()
+       _ -> do
+         vm <- gets visibleMenu
+         case vm of
+           NoMenu -> viewTorrent
+           Sort   -> setSortKey
+           Single -> do
+             p <- gets menuCursor
+             v <- gets T.view
+             case v of
+               SingleTorrent idx v' _ -> modify (\s -> s{T.view=SingleTorrent idx v' p})
+               _ -> undefined -- Single menu should only be visible in SingleTorrentView
 
     Just aDialog -> do
       let maybeResponse = dialogSelection aDialog

@@ -1,5 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeOperators    #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeOperators     #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 module UI.Client (
                         startClient)
@@ -11,16 +12,16 @@ import qualified Data.IntSet              as IS (fromList, toList)
 import           Data.Maybe               (fromJust)
 import qualified Data.Text                as T (pack)
 import           Effectful                (Eff, (:>))
-import           Effectful.Client         (Client, notifyUI,
-                                           readCurrentTorrents, readRPC,
-                                           writeCurrentTorrents)
-import qualified Effectful.Client         as C (curView, reverseSort, sortKey)
 import           Effectful.Concurrent     (Concurrent, forkIO)
 import           Effectful.Concurrent.STM (atomically, newEmptyTMVarIO,
                                            putTMVar, readTMVar)
 import           Effectful.FileSystem     (FileSystem)
-import           Effectful.Log            (Log, logInfo_)
+import           Effectful.Log            (Log, logInfo_, logTrace_)
 import           Effectful.Prim           (Prim)
+import           Effectful.RPCClient      (RPCClient, notifyUI,
+                                           readCurrentTorrents, readRPC,
+                                           writeCurrentTorrents)
+import qualified Effectful.RPCClient      as C (curView, reverseSort, sortKey)
 import           Effectful.Time           (Time)
 import           Effectful.Wreq           (Wreq)
 import qualified Transmission.RPC.Client  as TT (Client)
@@ -35,11 +36,13 @@ import           Types                    (Events (Updated), RPCPayload (..),
                                            RPCRequest (..))
 import           UI.Utils                 (sel)
 
-startClient :: (TT.Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, Client :> es)
+startClient :: (TT.Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, RPCClient :> es)
             => Eff es ()
 startClient = do
   void . forkIO . forever $ do
+    logTrace_ "Waiting for a request"
     req <- readRPC
+    logTrace_ "Got request"
     let outChan = chan req
     tl <- case payload req of
             TimerMajor -> pure Nothing
@@ -51,11 +54,14 @@ startClient = do
               pure Nothing
             Add tors -> addElements tors >> pure Nothing
     (torrents', sesh, seshStats) <- getElements tl
+    logTrace_ "Got request results, sending to the matcher"
     broadcaster <- newEmptyTMVarIO
     atomically $ do
       putTMVar outChan (torrents', broadcaster)
+    logTrace_ "Waiting for matcher response"
     unmatched <- atomically $ do
       readTMVar broadcaster
+    logTrace_ "Got matcher response"
     view <- C.curView
     sortKey <- C.sortKey
     reverseSort <- C.reverseSort

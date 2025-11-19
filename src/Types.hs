@@ -35,6 +35,7 @@ module Types
   mainContentHeight,
   visibleDialog,
   request,
+  clientLog, 
   Menu(..),
   newState,
   DialogContent (..),
@@ -54,7 +55,6 @@ import           Data.HashMap.Strict              (HashMap)
 import           Data.HashSet                     (HashSet)
 import           Data.IntMap                      (IntMap)
 import           Data.IntSet                      (IntSet)
-import           Data.IORef                       (IORef)
 import           Data.Text
 import           Effectful.Concurrent.STM         (TChan, TVar)
 import qualified Streamly.Internal.FS.Event.Linux as FS (Event)
@@ -119,7 +119,7 @@ data Matcher where
               } -> Matcher
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched
-          | SingleTorrent Int View Int | Active
+          | SingleTorrent Int View Int | Active | Log
   deriving (Eq, Ord, Show)
 
 data KeyEvent =
@@ -134,6 +134,7 @@ data KeyEvent =
               | DownloadingViewEvent
               | ErrorViewEvent
               | InactiveViewEvent
+              | LogViewEvent
               | MainViewEvent
               | MenuOffEvent
               | PageUpEvent
@@ -171,6 +172,7 @@ data AppState where
                visibleWidth :: Int,
                mainContentHeight :: Int,
                visibleDialog :: Maybe (Dialog (Maybe DialogContent) String),
+               clientLog :: [Text],
                clientState :: TVar ClientState,
                request :: TChan RPCPayload
                } ->
@@ -185,6 +187,7 @@ data ClientState where
 
 data Events where
   Updated :: [Torrent] -> Session -> SessionStats -> Events
+  LogEvent :: Text -> Events
 
 data Menu = NoMenu | Sort | Single deriving Eq
 
@@ -198,7 +201,7 @@ instance Hashable UFID where
 newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState)
          -> TVar ClientState -> TChan RPCPayload -> AppState
 newState keyConfig dispatcher = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
-  NoMenu 0 0 mempty 0 0 0 0 Nothing
+  NoMenu 0 0 mempty 0 0 0 0 Nothing []
 
 getView :: View -> View
 getView (SingleTorrent _ v _) = v
