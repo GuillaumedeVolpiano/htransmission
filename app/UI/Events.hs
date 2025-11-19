@@ -21,6 +21,7 @@ module UI.Events (
                  , cursorLeft
                  , cursorRight
                  , menuOff
+                 , requestAddTorrent
                  )
 where
 
@@ -55,7 +56,7 @@ import           Types                    (AppState (visibleDialog),
                                            View (Log, SingleTorrent),
                                            mainCursor, mainOffset,
                                            mainVisibleHeight, menuCursor,
-                                           selected, visibleMenu, visibleWidth)
+                                           selected, visibleMenu, visibleWidth, fileBrowserVisible)
 import           UI.Utils                 (mkDialog)
 import           Utils                    (sortTorrents)
 
@@ -323,3 +324,8 @@ tabSwitch = do
           i' = (i + 1) `mod` length buttons
           d' = setDialogFocus (show i') d
       modify (\s -> s {visibleDialog = Just d'})
+
+requestAddTorrent :: EventM n AppState ()
+requestAddTorrent = do
+    fbv <- gets fileBrowserVisible
+    unless fbv $ modify (\s -> s {fileBrowserVisible = True})

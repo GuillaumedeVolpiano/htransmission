@@ -36,6 +36,8 @@ module Types
   visibleDialog,
   request,
   clientLog, 
+  fileBrowser,
+  fileBrowserVisible,
   Menu(..),
   newState,
   DialogContent (..),
@@ -64,7 +66,8 @@ import           Transmission.RPC.Session         (Session, SessionStats,
                                                    emptySessionStats)
 import           Transmission.RPC.Torrent         (Torrent)
 import           Transmission.RPC.Types           (Label)
-import Control.Concurrent.STM (TMVar)
+import Control.Concurrent.STM (TMVar, TBQueue)
+import Brick.Widgets.FileBrowser (FileBrowser)
 
 data Action = Global | Matched deriving (Eq, Ord)
 
@@ -116,6 +119,7 @@ data Matcher where
               , idToTorrents :: TVar (HashMap UFID IntSet)
               , torrentToIDs :: TVar (IntMap (HashSet UFID))
               , prunable :: TVar IntSet
+              , eventQueue :: TBQueue UpdateEvent
               } -> Matcher
 
 data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched
@@ -153,6 +157,7 @@ data KeyEvent =
               | SelectDownEvent
               | SortMenuEvent
               | TabSwitchEvent
+              | FileBrowserViewEvent
             deriving (Eq, Ord)
 
 data AppState where
@@ -173,8 +178,10 @@ data AppState where
                mainContentHeight :: Int,
                visibleDialog :: Maybe (Dialog (Maybe DialogContent) String),
                clientLog :: [Text],
+               fileBrowserVisible :: Bool,
                clientState :: TVar ClientState,
-               request :: TChan RPCPayload
+               request :: TChan RPCPayload,
+               fileBrowser :: FileBrowser String
                } ->
                 AppState
 
@@ -199,9 +206,9 @@ instance Hashable UFID where
   hashWithSalt s (UFID (CIno w, CDev w')) = hashWithSalt s (w, w')
 
 newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState)
-         -> TVar ClientState -> TChan RPCPayload -> AppState
+         -> TVar ClientState -> TChan RPCPayload -> FileBrowser String -> AppState
 newState keyConfig dispatcher = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
-  NoMenu 0 0 mempty 0 0 0 0 Nothing []
+  NoMenu 0 0 mempty 0 0 0 0 Nothing [] False
 
 getView :: View -> View
 getView (SingleTorrent _ v _) = v

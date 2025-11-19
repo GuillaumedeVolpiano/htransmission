@@ -17,8 +17,8 @@ import           Data.Maybe                   (fromJust)
 import qualified Streamly.Data.Fold           as F (foldl')
 import           Streamly.Data.Fold           (Fold)
 import qualified Streamly.Data.Stream         as S (fold, fromList, unfoldrM, catMaybes)
-import qualified Streamly.Data.Stream.Prelude as S (maxThreads, parConcatMap)
-import           Streamly.Data.Stream.Prelude (Stream)
+import qualified Streamly.Data.Stream.Prelude as S (parConcatMap)
+import           Streamly.Data.Stream.Prelude (Stream, eager)
 import           System.Directory             (listDirectory)
 import           System.FilePath.Posix        ((</>), normalise, splitDirectories, joinPath)
 import           System.Posix                 (deviceID, fileID, getFileStatus,
@@ -76,8 +76,8 @@ sortTorrents sk reversed = rev . sortBy (key <> (compare `on` (fromJust . toId))
                 DateAdded       -> compare `on` addedDate
                 Labels          -> compare `on` labels
 
-getFileNodes :: Int -> [FilePath] -> IO (HashSet UFID, HashMap FilePath UFID)
-getFileNodes mt arrs = S.fromList arrs & S.parConcatMap (S.maxThreads mt) getAllPairs & S.fold foldFileNodesPairs
+getFileNodes :: [FilePath] -> IO (HashSet UFID, HashMap FilePath UFID)
+getFileNodes arrs = S.fromList arrs & S.parConcatMap (eager True) getAllPairs & S.fold foldFileNodesPairs
 
 getFileNodePair :: FilePath -> IO (Maybe (FilePath, UFID))
 getFileNodePair fp = do

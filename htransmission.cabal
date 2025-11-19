@@ -63,12 +63,13 @@ library
   exposed-modules:
     Constants
     Effectful.RPCClient
-    Streamly.Matcher
     Streamly.Generators
+    Streamly.Matcher
     Types
     Utils
 
   build-depends:
+    , async                 ^>=2.2.5
     , base                  ^>=4.21.0.0
     , brick                 ^>=2.10
     , containers            ^>=0.7
@@ -145,4 +146,4 @@ executable htransmission
 
   -- Base language which the package is written in.
   default-language: Haskell2010
-  ghc-options:      -threaded -fllvm "-with-rtsopts=-N"
+  ghc-options:      -threaded -fllvm -with-rtsopts=-N

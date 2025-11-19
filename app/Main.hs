@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
 
 module Main where
@@ -9,9 +10,8 @@ import           Brick.BChan                (newBChan, writeBChan)
 import           Constants                  (arrPaths)
 import           Control.Concurrent         (forkIO, getNumCapabilities)
 import           Control.Concurrent.STM     (atomically, newTChanIO, newTVarIO,
-                                             readTChan, writeTChan)
+                                             readTChan, writeTChan, newTBQueueIO)
 import           Control.Monad              (forever, void)
-import           Data.Function              ((&))
 import           Data.IORef                 (newIORef)
 import qualified Data.Text.IO               as T
 import           Effectful                  (runEff)
@@ -29,10 +29,7 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              helper, info, long, metavar,
                                              progDesc, short, strOption, value,
                                              (<**>))
-import qualified Streamly.Data.Fold         as F (drain)
-import qualified Streamly.Data.Stream       as S (fold)
 import qualified Streamly.Generators        as S (timer, uiBUS, watcher)
-import qualified Streamly.Matcher           as S (matcher)
 import           System.IO                  (stderr)
 import qualified Transmission.RPC.Client    as TT (runClient)
 import           Transmission.RPC.Client    (fromUrl)
@@ -43,6 +40,8 @@ import           UI.Client                  (startClient)
 import           UI.Constants
 import           UI.KeyEvents               (dispatcher, keyConfig)
 import           Utils                      (getFileNodes)
+import Brick.Widgets.FileBrowser (newFileBrowser, selectNonDirectories)
+import Streamly.Matcher (runMatcher)
 
 newtype Args = Args {
                  getHost :: String
@@ -58,11 +57,12 @@ main = do
   (Args url) <- execParser . info (args <**> helper) $ (fullDesc <> progDesc "A command line to communicate with transmission-daemon")
   chan <- newBChan 10
   nc <- getNumCapabilities
-  (ais, aim) <- getFileNodes nc arrPaths
+  (ais, aim) <- getFileNodes arrPaths
   clientState <- newTVarIO newClientState
   req <- newTChanIO
   pay <- newTChanIO
   logChan <- newTChanIO
+  eventQueue <- newTBQueueIO 64
   prunedVar <- newTVarIO mempty
   ais' <- newTVarIO ais
   aim' <- newTVarIO aim
@@ -77,12 +77,13 @@ main = do
       watchStream = S.watcher arrPaths
       reservedThreads = 4 -- matcher, client, logger, UI
       wt = max (nc - reservedThreads) 1
-      matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar
+      matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar eventQueue
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
-  let appState = newState keyConfig dispatcher clientState pay
+  fb <- newFileBrowser selectNonDirectories "FileBrowser" Nothing
+  let appState = newState keyConfig dispatcher clientState pay fb
   void . forkIO . forever $ atomically (readTChan logChan) >>= T.hPutStrLn stderr
-  void . forkIO $ S.matcher matcher [timerStream, uiStream, watchStream] & S.fold F.drain
+  void . forkIO $ runMatcher matcher [timerStream, uiStream, watchStream] 
   void $ runEff .runConcurrent . TT.runClient client . runWreq
     . runPrim . runLog "Client" logger LogTrace . runTime . runFileSystem
     . runRPCClient req clientState chan ct $ startClient

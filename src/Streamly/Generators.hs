@@ -21,7 +21,7 @@ import           Types                                  (RPCPayload (TimerMajor,
                                                          UpdateEvent (FSEvent, RPCEvent))
 
 timer :: Int -> IORef Int -> TChan RPCRequest -> Stream IO UpdateEvent
-timer period counter rpcIn =  parConcat id . parRepeatM (constRate 1) $ tick
+timer period counter rpcIn =  parConcat id . parRepeatM (constRate 2) $ tick
     where
       tick = do
         c <- readIORef counter
