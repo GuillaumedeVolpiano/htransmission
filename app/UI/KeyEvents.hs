@@ -22,15 +22,15 @@ import qualified Data.Text                       as T (unpack)
 import           Graphics.Vty                    (Key (KChar, KDown, KEnter, KEsc, KFun, KLeft, KPageDown, KPageUp, KRight, KUp))
 import           Types                           (AppState, KeyEvent (..),
                                                   Menu (Sort), View (..))
-import           UI.Events                       (cursorDown, cursorLeft,
-                                                  cursorRight, cursorTrigger,
-                                                  cursorUp, menuOff, menuOnOff,
-                                                  pageDown, pageUp,
-                                                  removeTorrent, reverseSort,
-                                                  selectAll, selectDown,
-                                                  selectNone, selectOne,
-                                                  selectUp, switchView,
-                                                  tabSwitch)
+import           UI.Events                       (cursorDown,
+                                                  cursorLeft, cursorRight,
+                                                  cursorTrigger, cursorUp,
+                                                  menuOff, menuOnOff, pageDown,
+                                                  pageUp, removeTorrent,
+                                                  reverseSort, selectAll,
+                                                  selectDown, selectNone,
+                                                  selectOne, selectUp,
+                                                  switchView, tabSwitch, requestAddTorrent)
 
 allKeyEvents :: KeyEvents KeyEvent
 allKeyEvents = keyEvents [
@@ -63,7 +63,8 @@ allKeyEvents = keyEvents [
                           ("remove the selected torrents and their data", RemoveSelectedWithDataEvent),
                           ("switch the focused button", TabSwitchEvent),
                           ("active view", ActiveViewEvent),
-                          ("show the log", LogViewEvent)
+                          ("show the log", LogViewEvent),
+                          ("add a torrent", AddTorrentEvent)
                          ]
 
 defaultBindings :: [(KeyEvent, [Binding])]
@@ -96,7 +97,8 @@ defaultBindings = [
                    (RemoveSelectedWithDataEvent, [meta '-']),
                    (TabSwitchEvent, [bind (KChar '\t')]),
                    (ActiveViewEvent, [meta 'a']),
-                   (LogViewEvent, [ctrl 'l'])
+                   (LogViewEvent, [ctrl 'l']),
+                   (AddTorrentEvent, [bind (KChar '+')])
                   ]
 
 keyConfig :: KeyConfig KeyEvent
@@ -132,7 +134,8 @@ handlers = [
             onEvent RemoveSelectedWithDataEvent "Remove selected torrents and their data" (removeTorrent True),
             onEvent TabSwitchEvent "Switch selected button" tabSwitch,
             onEvent ActiveViewEvent "Switch to the active view" (switchView Active),
-            onEvent LogViewEvent "Switch to the log view" (switchView Log)
+            onEvent LogViewEvent "Switch to the log view" (switchView Log),
+            onEvent AddTorrentEvent "Add a torrent" requestAddTorrent
            ]
 
 dispatcher :: KeyDispatcher KeyEvent (EventM String AppState)

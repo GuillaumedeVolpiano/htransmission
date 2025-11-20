@@ -9,8 +9,9 @@ import           Brick                      (customMain)
 import           Brick.BChan                (newBChan, writeBChan)
 import           Constants                  (arrPaths)
 import           Control.Concurrent         (forkIO, getNumCapabilities)
-import           Control.Concurrent.STM     (atomically, newTChanIO, newTVarIO,
-                                             readTChan, writeTChan, newTBQueueIO)
+import           Control.Concurrent.STM     (atomically, newTBQueueIO,
+                                             newTChanIO, newTVarIO, readTChan,
+                                             writeTChan)
 import           Control.Monad              (forever, void)
 import           Data.IORef                 (newIORef)
 import qualified Data.Text.IO               as T
@@ -30,6 +31,7 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              progDesc, short, strOption, value,
                                              (<**>))
 import qualified Streamly.Generators        as S (timer, uiBUS, watcher)
+import           Streamly.Matcher           (runMatcher)
 import           System.IO                  (stderr)
 import qualified Transmission.RPC.Client    as TT (runClient)
 import           Transmission.RPC.Client    (fromUrl)
@@ -37,11 +39,9 @@ import           Types                      (Events (LogEvent),
                                              Matcher (Matcher), newClientState,
                                              newState)
 import           UI.Client                  (startClient)
-import           UI.Constants
+import           UI.Constants (app, fileBrowser, addForm)
 import           UI.KeyEvents               (dispatcher, keyConfig)
 import           Utils                      (getFileNodes)
-import Brick.Widgets.FileBrowser (newFileBrowser, selectNonDirectories)
-import Streamly.Matcher (runMatcher)
 
 newtype Args = Args {
                  getHost :: String
@@ -80,10 +80,10 @@ main = do
       matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar eventQueue
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
-  fb <- newFileBrowser selectNonDirectories "FileBrowser" Nothing
-  let appState = newState keyConfig dispatcher clientState pay fb
+  fb <- fileBrowser
+  let appState = newState keyConfig dispatcher addForm clientState pay fb
   void . forkIO . forever $ atomically (readTChan logChan) >>= T.hPutStrLn stderr
-  void . forkIO $ runMatcher matcher [timerStream, uiStream, watchStream] 
+  void . forkIO $ runMatcher matcher [timerStream, uiStream, watchStream]
   void $ runEff .runConcurrent . TT.runClient client . runWreq
     . runPrim . runLog "Client" logger LogTrace . runTime . runFileSystem
     . runRPCClient req clientState chan ct $ startClient

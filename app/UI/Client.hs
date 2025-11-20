@@ -6,7 +6,7 @@ module UI.Client (
                         startClient)
 where
 import           Constants                (basicSession, mainTorrents)
-import           Control.Monad            (forever, void)
+import           Control.Monad            (forever, void, forM_)
 import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS (fromList, toList)
 import           Data.Maybe               (fromJust)
@@ -52,7 +52,8 @@ startClient = do
               logInfo_ (T.pack ("Deleting torrents " ++ show tors))
               deleteTorrent (IDs . map ID . IS.toList $ torIds) deleteData Nothing
               pure Nothing
-            Add tors -> addElements tors >> pure Nothing
+            Add fps downloadDir labels _ started  -> addElements fps downloadDir labels started
+              >> pure Nothing
     (torrents', sesh, seshStats) <- getElements tl
     logTrace_ "Got request results, sending to the matcher"
     broadcaster <- newEmptyTMVarIO
@@ -67,7 +68,7 @@ startClient = do
     reverseSort <- C.reverseSort
     let torrents'' = sel view unmatched sortKey reverseSort torrents'
     writeCurrentTorrents . IS.fromList . map (fromJust . toId) $ torrents''
-    notifyUI (Types.Updated torrents'' sesh seshStats)
+    notifyUI (Updated torrents' torrents'' sesh seshStats unmatched)
 
 getElements :: (TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es) =>
     Maybe IntSet -> Eff es ([Torrent], Session, SessionStats)
@@ -79,6 +80,7 @@ getElements torrents = do
     pure (torrents', sesh, seshStats)
 
 addElements :: (TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
-  [(FilePath, FilePath, [Label])]-> Eff es ()
-addElements torIds = do
-  mapM_ ((\(t, d, l) -> addTorrent t Nothing d Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing l Nothing) . (\(a, b, c) -> (Path a, Just b, Just c))) torIds
+  [FilePath]-> FilePath -> [Label] -> Bool -> Eff es ()
+addElements fps downloadDir labels started = do
+  forM_ fps $ \t -> addTorrent (Path t) Nothing (Just downloadDir) Nothing Nothing (Just . not $ started) Nothing
+    Nothing Nothing Nothing Nothing (Just labels) Nothing

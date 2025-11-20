@@ -11,6 +11,7 @@ import           Brick                     (Padding (..), Widget, emptyWidget,
 import           Brick.Widgets.Border      (borderWithLabel, hBorder)
 import           Brick.Widgets.Core        (joinBorders)
 import           Brick.Widgets.Dialog      (renderDialog)
+import           Brick.Widgets.FileBrowser (FileBrowser, renderFileBrowser)
 import           Brick.Widgets.ProgressBar (progressBar)
 import           Data.IntSet               (IntSet, member)
 import           Data.Maybe                (fromJust, fromMaybe, isJust,
@@ -42,27 +43,32 @@ import           Transmission.RPC.Torrent  (ETA (ETA, NA, Unknown), Torrent,
                                             tAnnounce, toId, totalSize,
                                             trackers, uploadedEver, webseeds,
                                             webseedsSendingToUs)
-import qualified Types                     as UT (torrents)
+import qualified Types                     as UT (visibleTorrents)
 import           Types                     (AppState,
                                             Menu (NoMenu, Single, Sort),
-                                            View (..), clientLog, mainCursor,
+                                            View (..), clientLog, fileBrowser,
+                                            mainCursor,
                                             mainOffset, mainVisibleHeight,
                                             menuCursor, selected, session,
                                             sessionStats, view, visibleDialog,
-                                            visibleMenu)
+                                            visibleMenu, AddTorrent, Events, addForm, newTorrentsPaths)
 import           UI.Attrs                  (selectedAttr)
 import           UI.Utils                  (highlightRow)
+import Brick.Forms (Form, renderForm)
 
 mkView :: AppState -> [Widget String]
 mkView s = pure .
   showDialog . showMenu $ mainWidget
   where
-    mainWidget
-      | view s == Unmatched = matchedView Unmatched (mainCursor s) (UT.torrents s) (session s)
+    mainWidget = case view s of
+      FileBrowser _ -> fileBrowserView vh . fileBrowser $ s
+      NewTorrentForm _ -> addTorrentFormView vh (newTorrentsPaths s) . addForm $ s
+      Unmatched -> matchedView Unmatched (mainCursor s) (UT.visibleTorrents s) (session s)
         (sessionStats s) (selected s) vh (mainOffset s)
-      | view s == Log = logView vh (clientLog s)
-      | isJust tid = singleView (fromJust tid) pos (UT.torrents s) (session s) (sessionStats s) vh
-      | otherwise = mainView (view s) (mainCursor s) (UT.torrents s) (session s) (sessionStats s) (selected s) vh
+      Log -> logView vh (clientLog s)
+      _ -> if isJust tid 
+              then singleView (fromJust tid) pos (UT.visibleTorrents s) (session s) (sessionStats s) vh
+              else mainView (view s) (mainCursor s) (UT.visibleTorrents s) (session s) (sessionStats s) (selected s) vh
         (mainOffset s)
     showMenu = case visibleMenu s of
                  NoMenu -> joinBorders
@@ -374,5 +380,13 @@ singleTorrentMenu mc vh = hLimit 20 (vBox [ hBorder, str " ", hBorder ]
   <=> vBox [hBorder, str " ", hBorder])
 
 logView :: Int -> [Text] -> Widget n
-logView vh = borderWithLabel (str "Log") . vLimit vh . hLimitPercent 90 . (<=> fill ' ') . vBox 
+logView vh = borderWithLabel (str "Log") . vLimit vh . hLimitPercent 90 . (<=> fill ' ') . vBox
   . map (vLimit 1 . (<+> fill ' ') . txt) . reverse . take vh
+
+fileBrowserView :: Int -> FileBrowser String -> Widget String
+fileBrowserView vh = borderWithLabel (str "Select one or more torrents") . vLimit vh . hLimitPercent 90 . renderFileBrowser True
+
+addTorrentFormView :: Int -> [FilePath] -> Form AddTorrent Events String -> Widget String
+addTorrentFormView vh fps = borderWithLabel (str "Add torrents") . vLimit vh . hLimitPercent 90 
+  . (<=> fill ' ') . vBox . ((:) . borderWithLabel (str "Torrents") . vBox . map (vLimit 1 . str) $ fps) 
+  . (:[]) . renderForm

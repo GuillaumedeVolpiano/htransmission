@@ -15,7 +15,8 @@ import           Brick                    (CursorLocation (CursorLocation, curso
 import           Brick.BChan              (BChan, writeBChan)
 import           Brick.Widgets.Dialog     (Dialog, dialog)
 import           Data.IntSet              (IntSet, member)
-import           Data.Maybe               (fromJust, fromMaybe)
+import           Data.List                (find)
+import           Data.Maybe               (fromJust, fromMaybe, listToMaybe)
 import           Effectful                (MonadUnliftIO, withRunInIO)
 import           Effectful.Log            (Logger, mkLogger, showLogMessage)
 import           Log.Internal.Logger      (withLogger)
@@ -26,12 +27,12 @@ import qualified Transmission.RPC.Types   as TT (Error (OK),
                                                  Status (Downloading, Seeding, Stopped))
 import           Types                    (Action (Global, Matched), AppState,
                                            DialogContent (Alert, Remove),
-                                           Menu (NoMenu), Sort,
-                                           View (Active, Complete, Downloading, Error, Inactive, Log
-                                            , Main, Paused, Seeding, SingleTorrent, Unmatched),
-                                           Events (LogEvent),
-                                           getView, mainCursor, menuCursor,
-                                           visibleMenu)
+                                           Events (LogEvent), Menu (NoMenu),
+                                           Sort,
+                                           View (Active, Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched, FileBrowser, NewTorrentForm),
+                                           getView,
+                                           mainCursor, menuCursor, visibleMenu)
+import qualified Types as T (view) 
 import           UI.Attrs                 (cursorAttr)
 import           Utils                    (sortTorrents)
 
@@ -49,24 +50,28 @@ sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filte
       Unmatched         -> flip member unmatched . fromJust . toId
       Active            -> (\t -> rateDownload t > Just 0 || rateUpload t > Just 0)
       SingleTorrent {}  -> undefined
-      Log -> const True
+      _ -> const True
 
 actionFromView :: View -> Action
 actionFromView Unmatched = Matched
 actionFromView _         = Global
 
-appChooseCursor :: AppState -> [CursorLocation n] -> Maybe (CursorLocation n)
-appChooseCursor state _ = case visibleMenu state of
-                            NoMenu -> Just $ CursorLocation {
-                                                cursorLocation = Location (1, mainCursor state + 3), -- accounting for the borders
-                                                cursorLocationName = Nothing,
-                                                cursorLocationVisible = False
-                                                            }
-                            _ -> Just $ CursorLocation {
-                                                cursorLocation = Location (1, menuCursor state + 1), --accounting for the borders
-                                                cursorLocationName = Nothing,
-                                                cursorLocationVisible = False
-                                                       }
+appChooseCursor :: AppState -> [CursorLocation String] -> Maybe (CursorLocation String)
+appChooseCursor state locs = case T.view state of
+  FileBrowser _ -> (\c -> c{cursorLocationVisible =True}) <$> find ((==Just "FileBrowser") . cursorLocationName) locs
+  NewTorrentForm _ -> listToMaybe locs
+  _ -> case visibleMenu state of
+                  NoMenu -> Just $ CursorLocation {
+                                cursorLocation = Location (1, mainCursor state + 3), -- accounting for the borders
+                                cursorLocationName = Nothing,
+                                cursorLocationVisible = False
+                                            }
+                  _ -> Just $ CursorLocation {
+                                cursorLocation = Location (1, menuCursor state + 1), --accounting for the borders
+                                cursorLocationName = Nothing,
+                                cursorLocationVisible = False
+                                       }
+
 highlightRow :: Int -> [Widget n] -> [Widget n]
 highlightRow cursor = zipWith (\ i w -> (if i == cursor then highlight w else w)) [0..]
 

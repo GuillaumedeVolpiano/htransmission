@@ -1,4 +1,5 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GADTs           #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Types
   (
@@ -7,7 +8,6 @@ module Types
   Sort(..),
   UpdateEvent(..),
   RPCRequest(..),
-  UpdateConfig(..),
   View(..),
   KeyEvent(..),
   AppState(AppState),
@@ -18,26 +18,51 @@ module Types
   Response(..),
   UFID(..),
   view,
+  viewL,
   torrents,
+  torrentsL,
   session,
+  sessionL,
   sessionStats,
+  sessionStatsL,
   keyBindings,
+  keyBindingsL,
   keyHandler,
+  keyHandlerL,
   visibleMenu,
+  visibleMenuL,
   menuCursor,
+  menuCursorL,
   mainCursor,
+  mainCursorL,
   sortKey,
   reverseSort,
   selected,
+  selectedL,
   mainOffset,
+  mainOffsetL,
   mainVisibleHeight,
+  mainVisibleHeightL,
   visibleWidth,
+  visibleWidthL,
   mainContentHeight,
+  mainContentHeightL,
   visibleDialog,
+  visibleDialogL,
   request,
-  clientLog, 
+  requestL,
+  clientLog,
+  clientLogL,
   fileBrowser,
-  fileBrowserVisible,
+  fileBrowserL,
+  unmatched,
+  unmatchedL,
+  visibleTorrents,
+  visibleTorrentsL,
+  addForm,
+  addFormL,
+  newTorrentsPaths,
+  newTorrentsPathsL,
   Menu(..),
   newState,
   DialogContent (..),
@@ -45,13 +70,27 @@ module Types
   ClientState,
   curView,
   clientState,
-  newClientState
+  clientStateL,
+  newClientState,
+  AddTorrent(AddTorrent),
+  tags,
+  tagsL,
+  destination,
+  destinationL,
+  completed,
+  completedL,
+  startTorrent,
+  startTorrentL,
   )
 where
 import           Brick                            (EventM)
+import           Brick.Forms                      (Form)
 import           Brick.Keybindings                (KeyConfig)
 import           Brick.Keybindings.KeyDispatcher  (KeyDispatcher)
+import           Brick.Types                      (suffixLenses)
 import           Brick.Widgets.Dialog             (Dialog)
+import           Brick.Widgets.FileBrowser        (FileBrowser)
+import           Control.Concurrent.STM           (TBQueue, TMVar)
 import           Data.Hashable                    (Hashable, hashWithSalt)
 import           Data.HashMap.Strict              (HashMap)
 import           Data.HashSet                     (HashSet)
@@ -60,14 +99,13 @@ import           Data.IntSet                      (IntSet)
 import           Data.Text
 import           Effectful.Concurrent.STM         (TChan, TVar)
 import qualified Streamly.Internal.FS.Event.Linux as FS (Event)
-import           System.Posix                     (CIno (CIno), FileID, DeviceID, CDev (CDev))
+import           System.Posix                     (CDev (CDev), CIno (CIno),
+                                                   DeviceID, FileID)
 import           Transmission.RPC.Session         (Session, SessionStats,
                                                    emptySession,
                                                    emptySessionStats)
 import           Transmission.RPC.Torrent         (Torrent)
 import           Transmission.RPC.Types           (Label)
-import Control.Concurrent.STM (TMVar, TBQueue)
-import Brick.Widgets.FileBrowser (FileBrowser)
 
 data Action = Global | Matched deriving (Eq, Ord)
 
@@ -90,19 +128,10 @@ data RPCRequest where
 data RPCPayload where
   Get :: Maybe IntSet -> RPCPayload
   Delete :: (IntSet, Bool) -> RPCPayload
-  Add :: [(FilePath, FilePath, [Label])] -> RPCPayload
+  Add :: [FilePath] -> FilePath -> [Label] -> Bool -> Bool -> RPCPayload
   TimerMajor :: RPCPayload
   TimerMinor :: RPCPayload
   deriving (Show)
-
-data UpdateConfig where
-  UpdateConfig :: {
-                    watchDirs :: [FilePath]
-                  , fsDebounceMs :: Int
-                  , parallelism :: Int
-                  , tickInterval :: Double -- in s
-                  , tickPeriod :: Double
-                  } -> UpdateConfig
 
 data UIBUS where
   UIBUS ::  {
@@ -122,12 +151,13 @@ data Matcher where
               , eventQueue :: TBQueue UpdateEvent
               } -> Matcher
 
-data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched
+data View = Main | Downloading | Seeding | Complete | Paused | Inactive | Error | Unmatched | FileBrowser View | NewTorrentForm View
           | SingleTorrent Int View Int | Active | Log
   deriving (Eq, Ord, Show)
 
 data KeyEvent =
                 ActiveViewEvent
+              | AddTorrentEvent
               | CloseMenuEvent
               | CompleteViewEvent
               | CursorDownEvent
@@ -178,7 +208,10 @@ data AppState where
                mainContentHeight :: Int,
                visibleDialog :: Maybe (Dialog (Maybe DialogContent) String),
                clientLog :: [Text],
-               fileBrowserVisible :: Bool,
+               unmatched :: IntSet,
+               visibleTorrents :: [Torrent],
+               newTorrentsPaths :: [FilePath],
+               addForm :: Form AddTorrent Events String,
                clientState :: TVar ClientState,
                request :: TChan RPCPayload,
                fileBrowser :: FileBrowser String
@@ -193,22 +226,34 @@ data ClientState where
                  } -> ClientState
 
 data Events where
-  Updated :: [Torrent] -> Session -> SessionStats -> Events
+  Updated :: [Torrent] -> [Torrent] -> Session -> SessionStats -> IntSet -> Events
   LogEvent :: Text -> Events
 
 data Menu = NoMenu | Sort | Single deriving Eq
 
 data DialogContent = Alert Text | Remove ([Int], Bool)
 
+data AddTorrent where
+  AddTorrent :: {
+                tags :: Text
+                , destination :: Text
+                , completed :: Bool
+                , startTorrent :: Bool
+                } -> AddTorrent deriving Show
+
 newtype UFID = UFID {unUFID :: (FileID, DeviceID)} deriving Eq
+
+suffixLenses ''AppState
+
+suffixLenses ''AddTorrent
 
 instance Hashable UFID where
   hashWithSalt s (UFID (CIno w, CDev w')) = hashWithSalt s (w, w')
 
-newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState)
+newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> Form AddTorrent Events String
          -> TVar ClientState -> TChan RPCPayload -> FileBrowser String -> AppState
 newState keyConfig dispatcher = AppState Main [] emptySession emptySessionStats keyConfig dispatcher
-  NoMenu 0 0 mempty 0 0 0 0 Nothing [] False
+  NoMenu 0 0 mempty 0 0 0 0 Nothing [] mempty [] []
 
 getView :: View -> View
 getView (SingleTorrent _ v _) = v
