@@ -36,10 +36,10 @@ import qualified Types as T (view)
 import           UI.Attrs                 (cursorAttr)
 import           Utils                    (sortTorrents)
 
-sel :: View -> IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
+sel :: View -> Maybe IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
 sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filter selector
   where
-  selector = case getView view of
+    selector = case getView view of
       Main              -> const True
       Downloading       -> (== Just TT.Downloading) . status
       Seeding           -> (== Just TT.Seeding) . status
@@ -47,10 +47,11 @@ sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filte
       Paused            -> (== Just TT.Stopped) . status
       Inactive          -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
       Error             -> (/= Just TT.OK) . errorCode
-      Unmatched         -> flip member unmatched . fromJust . toId
+      Unmatched         -> flip member unmatched' . fromJust . toId
       Active            -> (\t -> rateDownload t > Just 0 || rateUpload t > Just 0)
       SingleTorrent {}  -> undefined
       _ -> const True
+    unmatched' = fromMaybe mempty unmatched
 
 actionFromView :: View -> Action
 actionFromView Unmatched = Matched

@@ -1,7 +1,9 @@
 module UI.Attrs
   (cursorAttr
   , attrMap
-  , selectedAttr)
+  , selectedAttr
+  , onAttr
+  , offAttr)
 where
 import           Brick                     (AttrMap, AttrName, attrName, on)
 import qualified Brick.AttrMap             as BA (attrMap)
@@ -20,7 +22,9 @@ attrMap = BA.attrMap defAttr [(cursorAttr, defAttr `withStyle` reverseVideo),
                               (progressCompleteAttr, defAttr `withBackColor` green),
                               (fileBrowserSelectedAttr, defAttr `withStyle` reverseVideo),
                               (focusedFormInputAttr, black `on` yellow),
-                              (invalidFormInputAttr, white `on` red)
+                              (invalidFormInputAttr, white `on` red),
+                              (onAttr, green `on` black),
+                              (offAttr, red `on` white)
                              ]
 
 cursorAttr :: AttrName
@@ -28,3 +32,10 @@ cursorAttr = attrName "cursor"
 
 selectedAttr :: AttrName
 selectedAttr = attrName "selected"
+
+onAttr :: AttrName
+onAttr = attrName "on"
+
+offAttr :: AttrName
+offAttr = attrName "off"
+

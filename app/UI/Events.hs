@@ -43,7 +43,7 @@ import           Control.Monad.STM         (atomically)
 import           Data.IntSet               (delete, insert, member)
 import qualified Data.IntSet               as IS (fromList)
 import qualified Data.IntSet               as S (fromList, toList)
-import           Data.Maybe                (fromJust)
+import           Data.Maybe                (fromJust, isNothing)
 import           Graphics.Vty              (Event (EvKey, EvResize),
                                             Key (KEnter, KEsc), displayBounds,
                                             outputIface)
@@ -58,7 +58,7 @@ import           Types                     (AppState (visibleDialog),
                                             Events (..),
                                             Menu (NoMenu, Single, Sort),
                                             RPCPayload (Delete, Get, Add),
-                                            View (Log, SingleTorrent, NewTorrentForm, FileBrowser), addForm,
+                                            View (Log, SingleTorrent, NewTorrentForm, FileBrowser, Unmatched), addForm,
                                             addFormL, clientLogL, completed,
                                             destination, fileBrowser,
                                             fileBrowserL,
@@ -146,16 +146,17 @@ updateView = do
 switchView :: View -> EventM n AppState ()
 switchView view = do
   csVar <- gets T.clientState
-  (rs, sortKey) <- liftIO . atomically $ do
-    cs <- readTVar csVar
-    let r = T.reverseSort cs
-        s = T.sortKey cs
-    modifyTVar' csVar (\st -> st{T.curView = view})
-    pure (r, s)
-  torrents <- gets T.torrents
   unmatched <- gets T.unmatched
-  let t' = sel view unmatched sortKey rs torrents
-  modify (set viewL view. set mainOffsetL 0 . set mainCursorL 0 . set visibleTorrentsL t')
+  unless (view == Unmatched && isNothing unmatched) $ do
+    (rs, sortKey) <- liftIO . atomically $ do
+      cs <- readTVar csVar
+      let r = T.reverseSort cs
+          s = T.sortKey cs
+      modifyTVar' csVar (\st -> st{T.curView = view})
+      pure (r, s)
+    torrents <- gets T.torrents
+    let t' = sel view unmatched sortKey rs torrents
+    modify (set viewL view. set mainOffsetL 0 . set mainCursorL 0 . set visibleTorrentsL t')
 
 menuOnOff :: Menu -> EventM n AppState ()
 menuOnOff menu = do

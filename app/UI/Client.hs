@@ -3,7 +3,8 @@
 {-# LANGUAGE TypeOperators     #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 module UI.Client (
-                        startClient)
+                   startClient
+                 )
 where
 import           Constants                (basicSession, mainTorrents)
 import           Control.Monad            (forever, void, forM_)
@@ -20,7 +21,7 @@ import           Effectful.Log            (Log, logInfo_, logTrace_)
 import           Effectful.Prim           (Prim)
 import           Effectful.RPCClient      (RPCClient, notifyUI,
                                            readCurrentTorrents, readRPC,
-                                           writeCurrentTorrents)
+                                           writeCurrentTorrents, isPrunableReady)
 import qualified Effectful.RPCClient      as C (curView, reverseSort, sortKey)
 import           Effectful.Time           (Time)
 import           Effectful.Wreq           (Wreq)
@@ -59,10 +60,13 @@ startClient = do
     broadcaster <- newEmptyTMVarIO
     atomically $ do
       putTMVar outChan (torrents', broadcaster)
-    logTrace_ "Waiting for matcher response"
-    unmatched <- atomically $ do
-      readTMVar broadcaster
-    logTrace_ "Got matcher response"
+    pr <- isPrunableReady
+    unmatched <- if pr then do
+      logTrace_ "Waiting for matcher response"
+      u <- fmap Just .  atomically $ readTMVar broadcaster
+      logTrace_ "Got matcher response"
+      pure u
+                                    else pure Nothing
     view <- C.curView
     sortKey <- C.sortKey
     reverseSort <- C.reverseSort

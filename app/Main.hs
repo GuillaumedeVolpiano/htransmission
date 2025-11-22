@@ -9,6 +9,7 @@ import           Brick                      (customMain)
 import           Brick.BChan                (newBChan, writeBChan)
 import           Constants                  (arrPaths)
 import           Control.Concurrent         (forkIO, getNumCapabilities)
+import Control.Concurrent.Async (race_)
 import           Control.Concurrent.STM     (atomically, newTBQueueIO,
                                              newTChanIO, newTVarIO, readTChan,
                                              writeTChan)
@@ -41,7 +42,6 @@ import           Types                      (Events (LogEvent),
 import           UI.Client                  (startClient)
 import           UI.Constants (app, fileBrowser, addForm)
 import           UI.KeyEvents               (dispatcher, keyConfig)
-import           Utils                      (getFileNodes)
 
 newtype Args = Args {
                  getHost :: String
@@ -57,34 +57,36 @@ main = do
   (Args url) <- execParser . info (args <**> helper) $ (fullDesc <> progDesc "A command line to communicate with transmission-daemon")
   chan <- newBChan 10
   nc <- getNumCapabilities
-  (ais, aim) <- getFileNodes arrPaths
   clientState <- newTVarIO newClientState
   req <- newTChanIO
   pay <- newTChanIO
   logChan <- newTChanIO
-  eventQueue <- newTBQueueIO 64
+  eventQueue <- newTBQueueIO 130 
   prunedVar <- newTVarIO mempty
-  ais' <- newTVarIO ais
-  aim' <- newTVarIO aim
+  ais' <- newTVarIO mempty 
+  aim' <- newTVarIO mempty
   itd <- newTVarIO mempty
   tid <- newTVarIO mempty
   ct <- newIORef mempty
+  pr <- newTVarIO False
   counter <- newIORef 0
   logger <- mkLogger "Brick" $ \msg -> do
-    (writeBChan chan . LogEvent $ showLogMessage Nothing msg) >> atomically (writeTChan logChan $ showLogMessage Nothing msg)
+    (writeBChan chan . LogEvent $ showLogMessage Nothing msg) >> atomically 
+      (writeTChan logChan $ showLogMessage Nothing msg)
   let timerStream = S.timer 5 counter req
       uiStream = S.uiBUS pay req
       watchStream = S.watcher arrPaths
       reservedThreads = 4 -- matcher, client, logger, UI
       wt = max (nc - reservedThreads) 1
-      matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar eventQueue
+      matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar pr eventQueue
   vty <- mkVty defaultConfig
   client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
   fb <- fileBrowser
   let appState = newState keyConfig dispatcher addForm clientState pay fb
   void . forkIO . forever $ atomically (readTChan logChan) >>= T.hPutStrLn stderr
-  void . forkIO $ runMatcher matcher [timerStream, uiStream, watchStream]
+  let m = runMatcher matcher [timerStream, uiStream, watchStream]
+      ui = customMain vty (mkVty defaultConfig) (Just chan) app appState
   void $ runEff .runConcurrent . TT.runClient client . runWreq
     . runPrim . runLog "Client" logger LogTrace . runTime . runFileSystem
-    . runRPCClient req clientState chan ct $ startClient
-  void $ customMain vty (mkVty defaultConfig) (Just chan) app appState
+    . runRPCClient req clientState chan ct pr $ startClient
+  race_ m ui

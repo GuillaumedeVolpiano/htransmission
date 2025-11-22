@@ -1,17 +1,14 @@
 
-module Streamly.Matcher (runMatcher)
-
+module Streamly.Matcher (
+                          runMatcher
+                        , updatePrunable
+                        )
 where
 import           Constants                              (labels, pathMap)
-import           Control.Concurrent.Async               (concurrently,
-                                                         replicateConcurrently_)
-import           Control.Concurrent.STM                 (atomically, putTMVar,
-                                                         readTBQueue, readTVar,
-                                                         readTVarIO,
-                                                         writeTBQueue,
+import           Control.Concurrent.STM                 (atomically, putTMVar, readTVar,
                                                          writeTVar)
 import           Control.Exception                      (IOException, try)
-import           Control.Monad                          (forever, void)
+import           Control.Monad                          (void)
 import           Data.Function                          ((&))
 import           Data.HashMap.Strict                    (HashMap)
 import qualified Data.HashMap.Strict                    as HM (delete,
@@ -40,82 +37,67 @@ import           Streamly.Data.Fold                     (Fold)
 import qualified Streamly.Data.Stream                   as S (fold, filterM)
 import           Streamly.Data.Stream                   (Stream)
 import           Streamly.Data.Stream.Prelude           (eager, parList)
+import qualified Streamly.Data.Fold.Prelude as F (parBuffered)
 import qualified Streamly.Internal.FileSystem.PosixPath as FP (toString)
 import           Streamly.Internal.FS.Event.Linux       (Event, getAbsPath,
                                                          isCreated, isDeleted,
                                                          isDir, isEventsLost)
-import           System.Posix                           (FileStatus, deviceID,
-                                                         fileID, getFileStatus)
 import qualified Transmission.RPC.Torrent               as T (labels)
 import           Transmission.RPC.Torrent               (Torrent, progress,
                                                          toId)
-import qualified Types                                  as T (Matcher (maxThreads))
 import           Types                                  (Matcher,
-                                                         Response (End, T),
                                                          UFID (UFID),
                                                          UpdateEvent (FSEvent, RPCEvent),
                                                          arrIDs, arrIDsMap,
-                                                         arrs, eventQueue,
+                                                         arrs,
                                                          idToTorrents, prunable,
-                                                         torrentToIDs)
+                                                         torrentToIDs, prunableReady)
 import           Utils                                  (buildFilesPath,
                                                          getFileNodes,
                                                          mkPathMap)
+import Control.Concurrent (forkIO)
+import System.Posix.ByteString (FileStatus, getFileStatus, deviceID, fileID)
+import Data.ByteString.Char8 as BS (pack)
 
 -- | Merge several 'UpdateEvent' streams (typically: filesystem events,
 --   RPC events, UI events) and process them concurrently using up to
 --   @maxThreads@ from the supplied 'Matcher'.
 matcher :: Matcher-> [Stream IO UpdateEvent] -> IO ()
-matcher mt streams = oneStream & S.filterM (needed mt) & S.fold (consumer mt)
+matcher mt streams = oneStream & S.fold (consumer mt)
   where
     oneStream = parList (eager True) streams
 
 consumer :: Matcher -> Fold IO UpdateEvent ()
-consumer mt = F.foldlM' consume (pure ())
+consumer mt = F.parBuffered id . F.foldlM' consume $ pure ()
   where
-    consume _ = atomically . writeTBQueue (eventQueue mt)
+    consume _ ev = case ev of
+                     RPCEvent torStream broadcaster -> do
+                        torStream & S.filterM (needed mt)
+                          & S.fold (F.parBuffered id $ F.foldlM' (\_ t -> updateNewTorrents t mt) $ pure ())
+                        atomically $ do
+                          p <- readTVar . prunable $ mt
+                          putTMVar broadcaster p
+                     FSEvent e -> do
+                       updateNewFiles e mt
+                       pure ()
 
-needed :: Matcher -> UpdateEvent -> IO Bool
-needed m ev = case ev of
-              RPCEvent r -> case r of
-                              T t -> atomically $ do
-                                        -- Read current torrent-to-files and file-to-torrent mappings
-                                        tid <- readTVar . torrentToIDs $ m
-                                        -- Only update if torrent is complete, has relevant labels, and is not already in the mapping
-                                        pure . not $ ((fromJust . toId $ t) `IM.member` tid || progress t /= Just 100 || null ((fromJust. T.labels $ t) `intersect` labels))
-                              _ -> pure True
 
-              _ -> pure True
-
-worker :: Matcher -> IO ()
-worker mt = forever $ do
-  ev <- atomically $ readTBQueue (eventQueue mt)
-  match mt ev
-
-spawnWorkers :: Matcher -> IO ()
-spawnWorkers mt = replicateConcurrently_ (T.maxThreads mt) (worker mt)
-
+needed :: Matcher -> Torrent -> IO Bool
+needed m t = atomically $ do
+  tid <- readTVar . torrentToIDs $ m
+  -- Only update if torrent is complete, has relevant labels, and is not already in the mapping
+  pure . not $ ((fromJust . toId $ t) `IM.member` tid || progress t /= Just 100 || null ((fromJust. T.labels $ t) `intersect` labels))
 
 runMatcher :: Matcher -> [Stream IO UpdateEvent] -> IO ()
-runMatcher mt streams = void $ concurrently (spawnWorkers mt) (matcher mt streams)
+runMatcher mt streams = do
+  void . forkIO $ buildArrs mt
+  matcher mt streams
 
 -- | Handle a single 'UpdateEvent'.
 --
 --   * 'RPCEvent t' dispatches to torrent-update logic.
 --   * 'End broadcaster' writes the accumulated prunable set.
 --   * 'FSEvent ev' dispatches to filesystem logic.
-match :: Matcher -> UpdateEvent -> IO ()
-match m u = case u of
-              RPCEvent r -> do
-                case r of
-                  T t -> updateNewTorrents t m
-                  End broadcaster -> do
-                    p <- readTVarIO . prunable $ m
-                    atomically . putTMVar broadcaster $ p
-              FSEvent ev -> do
-                updateNewFiles ev m
-                pure  ()
-
 -- | Handle arrival of a new finished torrent.
 --
 --   Computes the set of filesystem node IDs for the torrent, updates
@@ -155,7 +137,7 @@ updateNewFiles :: Event -> Matcher -> IO ()
 updateNewFiles ev m
   | isDir ev = pure ()  -- Only track files, not directories, as they can't be hardlinked
   | isCreated ev = do
-      let fp = FP.toString . getAbsPath $ ev
+      let fp = BS.pack . FP.toString . getAbsPath $ ev
       -- Safely attempt to get file status; ignore missing files
       es <- try (getFileStatus fp) :: IO (Either IOException FileStatus)
       case es of
@@ -179,9 +161,8 @@ updateNewFiles ev m
             let tis = HM.findWithDefault mempty u idt
             p <- readTVar (prunable m)
             writeTVar (prunable m) $ p `IS.difference` tis
-
   | isDeleted ev = do
-      let fp = FP.toString . getAbsPath $ ev
+      let fp = BS.pack . FP.toString . getAbsPath $ ev
 
       atomically $ do
         -- Look up the deleted file in arrIDsMap
@@ -205,10 +186,15 @@ updateNewFiles ev m
                 p <- readTVar . prunable $ m
                 let p' = IS.foldr (updatePrunableDeletion ais tid) p tos
                 writeTVar (prunable m) p'
-
-  | isEventsLost ev = do
+  | isEventsLost ev = buildArrs m
       -- On lost events, rebuild arrIDs and arrIDsMap completely
+  | otherwise = pure ()
+
+buildArrs :: Matcher -> IO ()
+buildArrs m = do
       let as = arrs m
+          pr = prunableReady m
+      atomically . writeTVar pr $ False
       (ais, aim) <- getFileNodes as
       atomically $ do
         writeTVar (arrIDs m) ais
@@ -218,7 +204,7 @@ updateNewFiles ev m
         tid <- readTVar . torrentToIDs $ m
         let p = IS.fromList . IM.keys . IM.filter (\fs -> null (fs `HS.intersection` ais)) $ tid
         writeTVar (prunable m) p
-  | otherwise = pure ()
+        writeTVar pr True
 
 -- | Update both the forward and reverse maps when a new torrent arrives.
 --

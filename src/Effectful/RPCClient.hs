@@ -13,6 +13,7 @@ module Effectful.RPCClient (
                            , writeCurrentTorrents
                            , readCurrentTorrents
                            , runRPCClient
+                           , isPrunableReady
                            )
 
 where
@@ -39,7 +40,8 @@ data instance StaticRep RPCClient = RPCClient {
                                           rpcIn :: TChan RPCRequest,
                                           clientState :: TVar ClientState,
                                           uiUpdate :: BChan Events,
-                                          currentTorrents :: IORef IntSet
+                                          currentTorrents :: IORef IntSet,
+                                          prunableReady :: TVar Bool
                                         }
 
 curView :: (Concurrent :> es, RPCClient :> es) => Eff es View
@@ -63,5 +65,9 @@ readCurrentTorrents = getStaticRep >>= readIORef . currentTorrents
 writeCurrentTorrents :: (Prim :> es, RPCClient :> es) => IntSet -> Eff es ()
 writeCurrentTorrents ct = getStaticRep >>= flip writeIORef ct . currentTorrents
 
-runRPCClient :: (IOE :> es) => TChan RPCRequest -> TVar ClientState -> BChan Events -> IORef IntSet -> Eff (RPCClient : es) a -> Eff es a
-runRPCClient r c u ct = evalStaticRep $ RPCClient r c u ct
+isPrunableReady :: (Concurrent :> es, RPCClient :> es) => Eff es Bool
+isPrunableReady = getStaticRep >>= readTVarIO . prunableReady 
+
+runRPCClient :: (IOE :> es) => TChan RPCRequest -> TVar ClientState -> BChan Events -> IORef IntSet 
+             -> TVar Bool -> Eff (RPCClient : es) a -> Eff es a
+runRPCClient r c u ct pr = evalStaticRep $ RPCClient r c u ct pr

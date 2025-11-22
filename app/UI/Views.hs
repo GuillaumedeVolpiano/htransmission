@@ -51,8 +51,8 @@ import           Types                     (AppState,
                                             mainOffset, mainVisibleHeight,
                                             menuCursor, selected, session,
                                             sessionStats, view, visibleDialog,
-                                            visibleMenu, AddTorrent, Events, addForm, newTorrentsPaths)
-import           UI.Attrs                  (selectedAttr)
+                                            visibleMenu, AddTorrent, Events, addForm, newTorrentsPaths, unmatched)
+import           UI.Attrs                  (selectedAttr, onAttr, offAttr)
 import           UI.Utils                  (highlightRow)
 import Brick.Forms (Form, renderForm)
 
@@ -68,8 +68,8 @@ mkView s = pure .
       Log -> logView vh (clientLog s)
       _ -> if isJust tid 
               then singleView (fromJust tid) pos (UT.visibleTorrents s) (session s) (sessionStats s) vh
-              else mainView (view s) (mainCursor s) (UT.visibleTorrents s) (session s) (sessionStats s) (selected s) vh
-        (mainOffset s)
+              else mainView (view s) (mainCursor s) (UT.visibleTorrents s) (session s) (sessionStats s) (selected s)
+                vh (mainOffset s) (isJust . unmatched $ s)
     showMenu = case visibleMenu s of
                  NoMenu -> joinBorders
                  Sort   -> \w -> joinBorders (sortMenu (menuCursor s) (mainVisibleHeight s) <+> w)
@@ -208,7 +208,7 @@ peersView :: Ord n => Int -> Int -> Widget n
 peersView connected total = str $ show connected ++ " of " ++ show total
 
 sessionView :: Ord n => Session -> SessionStats -> Widget n
-sessionView sesh seshStats = padLeft Max (str "Down: ") <+> sizeView (downloadSpeed seshStats)
+sessionView sesh seshStats = hLimitPercent 50 $ padLeft Max (str "Down: ") <+> sizeView (downloadSpeed seshStats)
   <+> str "/s (" <+> sizeView db <+> str " | "
   <+> limitView (fromMaybe False $ speedLimitDownEnabled sesh) (fromMaybe 0 $ speedLimitDown sesh)
   <+> str ") Up: " <+> sizeView (uploadSpeed seshStats) <+> str "/s ("
@@ -218,6 +218,12 @@ sessionView sesh seshStats = padLeft Max (str "Down: ") <+> sizeView (downloadSp
     where
       ub = uploadedBytes . currentStats $ seshStats
       db = downloadedBytes . currentStats $ seshStats
+
+statusView :: Ord n => Bool -> Widget n
+statusView unmatchedReady = hLimitPercent 50 . hBox $ [str "Unmatched: ", ready, fill ' '] 
+  where
+    ready = if unmatchedReady then withAttr onAttr $ str "ready"
+                              else withAttr offAttr $ str "not ready"
 
 torrentData :: Ord n => [Torrent] -> Widget n
 torrentData torrents = hLimitPercent 50 . padRight Max $
@@ -230,11 +236,11 @@ limitView :: Ord n => Bool -> Int -> Widget n
 limitView False _ = str "∞ "
 limitView _ lim   = sizeView lim <+> str "/s "
 
-mainView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Int -> Int -> Widget String
-mainView v mc torrents sesh seshStats selection visibleHeight offset =
+mainView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Int -> Int -> Bool -> Widget String
+mainView v mc torrents sesh seshStats selection visibleHeight offset unmatchedReady =
       borderWithLabel (str . show $ v) $ mainHeader <=> hBorder
   <=> (vLimit visibleHeight . mainTorrentsView mc selection . take visibleHeight . drop offset $ torrents)
-  <=> hBorder <=> vLimit 1 (sessionView sesh seshStats)
+  <=> hBorder <=> (vLimit 1 (statusView unmatchedReady) <+> vLimit 1 (sessionView sesh seshStats))
 
 matchedView :: View -> Int -> [Torrent] -> Session -> SessionStats -> IntSet -> Int -> Int -> Widget String
 matchedView v mc torrents sesh seshStats selection visibleHeight offset =

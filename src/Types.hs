@@ -15,7 +15,6 @@ module Types
   Events(..),
   Matcher(..),
   RPCPayload (..),
-  Response(..),
   UFID(..),
   view,
   viewL,
@@ -106,21 +105,19 @@ import           Transmission.RPC.Session         (Session, SessionStats,
                                                    emptySessionStats)
 import           Transmission.RPC.Torrent         (Torrent)
 import           Transmission.RPC.Types           (Label)
+import Streamly.Data.Stream (Stream)
+import System.Posix.ByteString (RawFilePath)
 
 data Action = Global | Matched deriving (Eq, Ord)
 
-type PathMap = FilePath -> FilePath
+type PathMap = RawFilePath -> RawFilePath
 
 data Sort = Name | PercentComplete | Downloaded | DownloadSpeed | Uploaded | UploadSpeed | ETA | Ratio | TotalSize
   | Peers | Seeds | DateAdded | Labels deriving (Enum, Eq, Ord)
 
 data UpdateEvent where
   FSEvent :: FS.Event -> UpdateEvent
-  RPCEvent :: Response -> UpdateEvent
-
-data Response where
-  T :: Torrent -> Response
-  End :: TMVar IntSet -> Response
+  RPCEvent :: Stream IO Torrent -> TMVar IntSet -> UpdateEvent
 
 data RPCRequest where
   RPCRequest :: { payload :: RPCPayload, chan :: TMVar ([Torrent], TMVar IntSet) } -> RPCRequest
@@ -142,12 +139,13 @@ data UIBUS where
 data Matcher where
   Matcher ::  {
                 maxThreads :: Int
-              , arrs :: [FilePath]
+              , arrs :: [RawFilePath]
               , arrIDs :: TVar (HashSet UFID)
-              , arrIDsMap :: TVar (HashMap FilePath UFID)
+              , arrIDsMap :: TVar (HashMap RawFilePath UFID)
               , idToTorrents :: TVar (HashMap UFID IntSet)
               , torrentToIDs :: TVar (IntMap (HashSet UFID))
               , prunable :: TVar IntSet
+              , prunableReady :: TVar Bool
               , eventQueue :: TBQueue UpdateEvent
               } -> Matcher
 
@@ -208,7 +206,7 @@ data AppState where
                mainContentHeight :: Int,
                visibleDialog :: Maybe (Dialog (Maybe DialogContent) String),
                clientLog :: [Text],
-               unmatched :: IntSet,
+               unmatched :: Maybe IntSet,
                visibleTorrents :: [Torrent],
                newTorrentsPaths :: [FilePath],
                addForm :: Form AddTorrent Events String,
@@ -226,7 +224,7 @@ data ClientState where
                  } -> ClientState
 
 data Events where
-  Updated :: [Torrent] -> [Torrent] -> Session -> SessionStats -> IntSet -> Events
+  Updated :: [Torrent] -> [Torrent] -> Session -> SessionStats -> Maybe IntSet -> Events
   LogEvent :: Text -> Events
 
 data Menu = NoMenu | Sort | Single deriving Eq

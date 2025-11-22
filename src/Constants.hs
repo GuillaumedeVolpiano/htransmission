@@ -9,6 +9,7 @@ module Constants (
 where
 
 import           Data.Text (Text)
+import System.Posix.ByteString (RawFilePath)
 
 mainTorrents :: [Text]
 mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateUpload", "eta", "uploadRatio"
@@ -19,13 +20,13 @@ mainTorrents = ["name", "downloadedEver", "rateDownload", "uploadedEver", "rateU
 basicSession :: [Text]
 basicSession = ["speed-limit-down-enabled", "speed-limit-down", "speed-limit-up-enabled", "speed-limit-up"]
 
-arrPaths :: [FilePath]
+arrPaths :: [RawFilePath]
 arrPaths = ["/opt/movies/finished", "/opt/shows/finished", "/opt/restricted/finished", "/opt/calibre/Calibre_Library", "/opt/calibre/Comics"]
 
 labels :: [Text]
 labels = ["radarr", "sonarr", "cross-seed"]
 
-pathMap :: [(FilePath, FilePath)]
+pathMap :: [(RawFilePath, RawFilePath)]
 pathMap = [
   ("/var/lib/rtorrent/downloads/radarr", "/opt/movies/downloads"),
   ("/var/lib/rtorrent/movies_uploads", "/opt/movies/uploads"),
