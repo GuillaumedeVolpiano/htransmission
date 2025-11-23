@@ -19,9 +19,9 @@ import           Control.Exception            (IOException, evaluate, try, brack
 import           Control.Monad                (forever, unless, void)
 import           Data.Function                ((&))
 import           Data.HashMap.Strict          (HashMap)
-import qualified Data.HashMap.Strict          as HM (insert, insertWith)
+import qualified Data.HashMap.Strict          as HM (insert, insertWith, union)
 import           Data.HashSet                 (HashSet)
-import qualified Data.HashSet                 as HS (insert)
+import qualified Data.HashSet                 as HS (insert, union)
 import qualified Data.IntMap                  as IM (insert, member)
 import           Data.IntMap.Strict           (IntMap)
 import           Data.IntSet                  (IntSet)
@@ -40,7 +40,7 @@ import           Log.Backend.StandardOutput   (withStdOutLogger)
 import qualified Streamly.Data.Fold           as F (foldl', foldlM')
 import           Streamly.Data.Fold           (Fold)
 import qualified Streamly.Data.Fold.Prelude   as F (parBuffered)
-import qualified Streamly.Data.Stream         as S (filterM, fold, fromList)
+import qualified Streamly.Data.Stream         as S (filterM, fold, fromList, mapM)
 import           Streamly.Data.Stream         (Stream)
 import qualified Streamly.Data.Stream.Prelude as S (parConcatMap, catMaybes, unfoldrM, parMapM, parConcat)
 import           Streamly.Data.Stream.Prelude (eager, parList)
@@ -51,15 +51,16 @@ import           System.Posix                 (FileStatus, getFileStatus,
 import           System.Posix.Types           (CDev (CDev), CIno (CIno))
 import           Test.Tasty.Bench             (bench, bgroup, defaultMain, env,
                                                nfIO)
-import           Transmission.RPC.Client      (Client, fromUrl, getTorrents,
-                                               runClient)
+import           Transmission.RPC.Client      (Client, getTorrents,
+                                               )
+import Effectful.RPC.Client (runClient)
+import Effectful.Network.HTTP.Client (runHttpClient)
 import qualified Transmission.RPC.Torrent     as T (downloadDir, labels)
 import           Transmission.RPC.Torrent     (Torrent, downloadDir, fName,
                                                files, progress, toId)
 import           Transmission.RPC.Types       (ID (ID), IDs (IDs))
-import qualified Types                        as T (maxThreads)
 import           Types                        (PathMap, UFID (UFID))
-import           Utils                        (mkPathMap)
+import           Utils                        (mkPathMap, mkUfid)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Sequence (Seq(Empty, (:<|)))
 import qualified Data.Sequence as Sq (singleton, fromList)
@@ -68,10 +69,16 @@ import qualified System.Posix.Files.ByteString as B (getFileStatus)
 import qualified System.Posix.ByteString as B (isDirectory)
 import System.Posix.Directory.ByteString (openDirStream, closeDirStream, readDirStream)
 import qualified Data.ByteString as BS (null, append)
-import qualified Data.ByteString.Char8 as BS (pack, last, unsnoc, span, break, all, uncons)
+import qualified Data.ByteString.Char8 as BS (pack, last, unsnoc, span, break, all, uncons, unpack)
 import Data.ByteString (ByteString)
 import qualified Data.List as L (uncons)
-import Debug.Trace
+import Streamly.FileSystem.DirIO (readEither)
+import qualified Streamly.Internal.FileSystem.PosixPath as S (unsafeFromString, toString)
+import qualified Streamly.FileSystem.Path as S (Path)
+import Streamly.Internal.FileSystem.DirIO (readEitherPaths)
+import Streamly.Internal.FileSystem.PosixPath (PosixPath(PosixPath))
+import qualified Streamly.Data.Array as A (fromList, toList)
+import qualified Data.ByteString as BSR (pack, unpack)
 
 data Response = T Int [FilePath] Rational [Text] FilePath | End
 
@@ -90,9 +97,6 @@ data Matcher where
               , prunable :: TVar IntSet
               , eventQueue :: TBQueue Response
               } -> Matcher
-
-instance NFData UFID where
-  rnf (UFID (CIno fid, CDev did)) = rnf fid `seq` rnf did
 
 splitDirectories :: RawFilePath -> [RawFilePath]
 splitDirectories = map dropTrailingPathSeparator . splitPath
@@ -261,6 +265,25 @@ extractTorrent t = T (fromJust . toId $ t) (map fName . fromJust . files $ t) (f
 getFileNodesOpt :: [RawFilePath] -> IO (HashSet UFID, HashMap RawFilePath UFID)
 getFileNodesOpt arrs = S.fromList arrs & S.parMapM (eager True) getAllPairsOpt & S.parConcat (eager True) & S.fold foldFileNodesPairsOpt
 
+getFileNodesStreamly :: [RawFilePath] -> IO (HashSet UFID, HashMap RawFilePath UFID)
+getFileNodesStreamly arrs = S.fromList arrs & S.mapM (getFileNodesOneStreamly . PosixPath . A.fromList . BSR.unpack) & S.fold (F.parBuffered id $ F.foldl' (\(a, b) (c, d) -> (a `HS.union` c, b `HM.union` d)) (mempty, mempty))
+
+getFileNodesOneStreamly :: S.Path -> IO (HashSet UFID, HashMap RawFilePath UFID)
+getFileNodesOneStreamly path = readEitherPaths id path & S.parMapM (eager True) fileNodeStream & S.fold foldNodeStream
+
+fileNodeStream :: Either S.Path S.Path -> IO (Either (HashSet UFID, HashMap RawFilePath UFID) (RawFilePath, UFID))
+fileNodeStream (Right (PosixPath file)) = do
+  let fp = BSR.pack . A.toList $ file
+  status <- B.getFileStatus fp
+  pure $ Right (fp, mkUfid (fileID status) (deviceID status)) 
+fileNodeStream (Left directory) = Left <$> getFileNodesOneStreamly directory
+
+foldNodeStream :: Fold IO (Either (HashSet UFID, HashMap RawFilePath UFID) (RawFilePath, UFID)) (HashSet UFID, HashMap RawFilePath UFID)
+foldNodeStream = F.parBuffered id $ F.foldl' foldNodes (mempty, mempty)
+  where
+    foldNodes (a, b) (Right (c, d)) = (HS.insert d a, HM.insert c d b)
+    foldNodes (a, b) (Left (c, d)) = (HS.union a c, HM.union b d)
+
 foldFileNodesPairs :: Fold IO (FilePath, UFID) (HashSet UFID, HashMap FilePath UFID)
 foldFileNodesPairs = F.parBuffered id $ F.foldl' (\(fis, fpm) (fp, fid) -> (HS.insert fid fis, HM.insert fp fid fpm)) mempty
 
@@ -306,24 +329,26 @@ getAllPairsOpt fp = pure $ S.unfoldrM getCurPairs (Sq.singleton fp) & S.catMaybe
                                 let children = fmap (f <//>) . Sq.fromList . filter (`notElem` ([".", ".."] :: [ByteString])) $ names
                                 getCurPairs (children <> fps)
                               else do
-                                pure . Just $ (Just (f, UFID (fileID s, deviceID s)), fps)
+                                pure . Just $ (Just (f, mkUfid (fileID s) (deviceID s)), fps)
 
 getFileNodePairOpt :: RawFilePath -> FileStatus -> IO (RawFilePath, UFID)
 getFileNodePairOpt fp s = do
   let i = fileID s
       d = deviceID s
-  pure (fp, UFID (i, d))
+  pure (fp, mkUfid i d)
 
 getFileNodePair :: FilePath -> FileStatus -> IO (FilePath, UFID)
 getFileNodePair fp s = do
   let i = fileID s
       d = deviceID s
-  pure (fp, UFID (i, d))
+  pure (fp, mkUfid i d)
 
 main :: IO ()
 main = do
   defaultMain [bgroup "Matcher" [ 
-                                bench "UnfoldOpt" . nfIO $ getFileNodesOpt arrPaths ]]
+                                  bench "UnfoldOpt" . nfIO $ getFileNodesOpt arrPaths 
+                                , bench "UnfoldStreamly" . nfIO $ getFileNodesStreamly arrPaths]
+              ]
 
 -- main :: IO ()
 -- main = do

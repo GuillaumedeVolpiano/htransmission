@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -6,17 +7,33 @@ module Utils
   , sortTorrents
   , buildFilesPath
   , getFileNodes
+  , timeIt
+  , mkUfid
+  , insertInUFIDPseudoSet
+  , insertInUFIDPseudoMap
+  , findWithDefaultUFIDPseudoMap
+  , deleteFromUFIDPseudoSet
+  , lookupUFIDPseudoMap
+  , ufidPseudoSetIntersection
   )
 where
 import           Control.Exception            (IOException, bracket, try)
+import           Control.Monad.IO.Class       (MonadIO, liftIO)
 import qualified Data.ByteString              as BS (append, null)
 import qualified Data.ByteString.Char8        as BS (all, break, pack, span,
                                                      uncons, unsnoc)
 import           Data.Function                (on, (&))
 import           Data.HashMap.Strict          (HashMap)
 import qualified Data.HashMap.Strict          as HM (insert)
-import           Data.HashSet                 (HashSet)
-import qualified Data.HashSet                 as HS (insert)
+import           Data.IntMap.Strict           (IntMap)
+import qualified Data.IntMap.Strict           as IM (filter, findWithDefault,
+                                                     foldrWithKey, fromSet,
+                                                     insertWith,
+                                                     intersectionWith, lookup,
+                                                     unionWith, update)
+import           Data.IntSet                  (IntSet)
+import qualified Data.IntSet                  as IS (delete, intersection, null,
+                                                     singleton, union)
 import           Data.List                    (isPrefixOf, sortBy)
 import qualified Data.List                    as L (uncons)
 import           Data.Maybe                   (fromJust)
@@ -24,15 +41,19 @@ import           Data.Sequence                (Seq (Empty, (:<|)))
 import qualified Data.Sequence                as Sq (singleton)
 import qualified Streamly.Data.Fold           as F (foldl')
 import           Streamly.Data.Fold           (Fold)
+import qualified Streamly.Data.Fold.Prelude   as F (parBuffered)
 import qualified Streamly.Data.Stream         as S (catMaybes, fold, fromList,
                                                     unfoldrM)
 import qualified Streamly.Data.Stream.Prelude as S (parConcatMap)
 import           Streamly.Data.Stream.Prelude (Stream, eager)
-import qualified Streamly.Data.Fold.Prelude as F (parBuffered)
-import           System.Posix.ByteString      (FileStatus, RawFilePath,
+import           System.Clock                 (Clock (Monotonic), getTime,
+                                               toNanoSecs)
+import           System.Posix.ByteString      (CDev (CDev), CIno (CIno),
+                                               DeviceID, DirStream, FileID,
+                                               FileStatus, RawFilePath,
                                                closeDirStream, deviceID, fileID,
                                                getFileStatus, isDirectory,
-                                               openDirStream, readDirStream, DirStream)
+                                               openDirStream, readDirStream)
 import           Transmission.RPC.Torrent     (Torrent, addedDate, downloadDir,
                                                downloadedEver, eta, fName,
                                                files, labels, name,
@@ -42,7 +63,6 @@ import           Transmission.RPC.Torrent     (Torrent, addedDate, downloadDir,
                                                webseeds)
 import           Types                        (PathMap, Sort (..), UFID (UFID))
 
-
 splitDirectories :: RawFilePath -> [RawFilePath]
 splitDirectories = map dropTrailingPathSeparator . splitPath
   where
@@ -51,7 +71,7 @@ splitDirectories = map dropTrailingPathSeparator . splitPath
                                      Just (i, '/') -> i
                                      _             -> f
 
-splitPath :: RawFilePath -> [RawFilePath]
+splitPath :: RawFilePath -> [RawFilePath]
 splitPath p = [drive | not (BS.null drive)] ++ f path
   where
     (drive, path) = BS.span (=='/') p
@@ -80,22 +100,22 @@ normalise path = addPathSeparator result
                    Just (x, xs') -> if BS.all (=='/') x then "/" : xs' else xs
                    Nothing       -> []
 
-combine :: RawFilePath -> RawFilePath -> RawFilePath
+combine :: RawFilePath -> RawFilePath -> RawFilePath
 combine a b
   | hasLeadingPathSeparator b = b
   | otherwise = combineAlways a b
 
-combineAlways :: RawFilePath -> RawFilePath -> RawFilePath
+combineAlways :: RawFilePath -> RawFilePath -> RawFilePath
 combineAlways a b
   | BS.null a = b
   | BS.null b = a
   | hasTrailingPathSeparator a = a `BS.append` b
   | otherwise = a <> "/" <> b
 
-hasLeadingPathSeparator :: RawFilePath -> Bool
+hasLeadingPathSeparator :: RawFilePath -> Bool
 hasLeadingPathSeparator fp = (fst <$> BS.uncons fp) == Just '/'
 
-normaliseDrive :: RawFilePath -> RawFilePath
+normaliseDrive :: RawFilePath -> RawFilePath
 normaliseDrive "" = ""
 normaliseDrive _  = "/"
 
@@ -152,32 +172,61 @@ sortTorrents sk reversed = rev . sortBy (key <> (compare `on` (fromJust . toId))
                 DateAdded       -> compare `on` addedDate
                 Labels          -> compare `on` labels
 
-getFileNodes :: [RawFilePath] -> IO (HashSet UFID, HashMap RawFilePath UFID)
+getFileNodes :: [RawFilePath] -> IO (IntMap IntSet, HashMap RawFilePath UFID)
 getFileNodes arrs = S.fromList arrs & S.parConcatMap (eager True) getAllPairs & S.fold foldFileNodesPairs
 
 getFileNodePair :: RawFilePath -> FileStatus -> IO (RawFilePath, UFID)
 getFileNodePair fp s = do
           let i = fileID s
               d = deviceID s
-          pure (fp, UFID (i, d))
+          pure (fp, mkUfid i d)
 
-foldFileNodesPairs :: Fold IO (RawFilePath, UFID) (HashSet UFID, HashMap RawFilePath UFID)
-foldFileNodesPairs = F.parBuffered id $ F.foldl' (\(fis, fpm) (fp, fid) -> (HS.insert fid fis, HM.insert fp fid fpm)) mempty
+mkUfid :: FileID -> DeviceID -> UFID
+mkUfid (CIno i) (CDev d) = UFID (fromIntegral i) (fromIntegral d)
 
-readAll :: RawFilePath -> DirStream -> IO (Seq RawFilePath)
+foldFileNodesPairs :: Fold IO (RawFilePath, UFID) (IntMap IntSet, HashMap RawFilePath UFID)
+foldFileNodesPairs = F.parBuffered id $ F.foldl' (\(fis, fpm) (fp, fid) -> (insertInUFIDPseudoSet fid fis, HM.insert fp fid fpm)) mempty
+
+insertInUFIDPseudoSet :: UFID -> IntMap IntSet -> IntMap IntSet
+insertInUFIDPseudoSet (UFID devID fID) = IM.insertWith IS.union devID (IS.singleton fID)
+
+insertInUFIDPseudoMap :: IntMap IntSet -> Int -> IntMap (IntMap IntSet) -> IntMap (IntMap IntSet)
+insertInUFIDPseudoMap ufidPseudoSet ti ufidPseudoMap = IM.foldrWithKey
+  (\devId fids -> IM.insertWith (IM.unionWith IS.union) devId (IM.fromSet (const (IS.singleton ti)) fids))
+  ufidPseudoMap ufidPseudoSet
+
+findWithDefaultUFIDPseudoMap :: a -> UFID -> IntMap (IntMap a) -> a
+findWithDefaultUFIDPseudoMap def (UFID devID fID) ufidPseudoMap = IM.findWithDefault def fID
+  $ IM.findWithDefault mempty devID ufidPseudoMap
+
+lookupUFIDPseudoMap :: UFID -> IntMap (IntMap a) -> Maybe a
+lookupUFIDPseudoMap (UFID devID fID) ufidPseudoMap = IM.lookup devID ufidPseudoMap >>= IM.lookup fID
+
+deleteFromUFIDPseudoSet :: UFID -> IntMap IntSet -> IntMap IntSet
+deleteFromUFIDPseudoSet (UFID devID fID) = IM.update delFID devID
+  where
+    delFID s = (\t -> if IS.null t then Nothing else Just t) $ IS.delete fID s
+
+ufidPseudoSetIntersection :: IntMap IntSet -> IntMap IntSet -> IntMap IntSet
+ufidPseudoSetIntersection im = IM.filter (not . IS.null) . IM.intersectionWith IS.intersection im
+
+readAll :: RawFilePath -> DirStream -> IO (Seq RawFilePath)
 readAll f ds = do
   e <- readDirStream ds
-  if BS.null e || e == "." || e == ".." then pure Empty
-                                        else do
-                                          rest <- readAll f ds
-                                          pure ((f </> e) :<| rest)
+  case e of
+    "" -> pure Empty
+    "." -> readAll f ds
+    ".." -> readAll f ds
+    _ -> do
+        rest <- readAll f ds
+        pure ((f </> e) :<| rest)
 
 getAllPairs :: RawFilePath -> Stream IO (RawFilePath, UFID)
 getAllPairs fp = S.unfoldrM getCurPairs (Sq.singleton fp) & S.catMaybes
   where
     getCurPairs Empty = pure Nothing
     getCurPairs (f :<| fps) = do
-      es <- try (getFileStatus f) :: IO (Either IOException FileStatus)
+      es <- try (getFileStatus f) :: IO (Either IOException FileStatus)
       case es of
         Left _ -> getCurPairs fps
         Right s -> do
@@ -187,3 +236,11 @@ getAllPairs fp = S.unfoldrM getCurPairs (Sq.singleton fp) & S.catMaybes
                             else do
                               pair <- getFileNodePair f s
                               pure . Just $ (Just pair, fps)
+
+timeIt :: MonadIO m => m a -> m (a, Int)
+timeIt action = do
+  start <- liftIO $ getTime Monotonic
+  !result <- action
+  end <- liftIO $ getTime Monotonic
+  let durationMS = fromIntegral (toNanoSecs (end - start)) / 1e6 :: Double
+  pure (result, round durationMS)

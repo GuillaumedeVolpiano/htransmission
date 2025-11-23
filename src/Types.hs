@@ -92,14 +92,11 @@ import           Brick.Widgets.FileBrowser        (FileBrowser)
 import           Control.Concurrent.STM           (TBQueue, TMVar)
 import           Data.Hashable                    (Hashable, hashWithSalt)
 import           Data.HashMap.Strict              (HashMap)
-import           Data.HashSet                     (HashSet)
 import           Data.IntMap                      (IntMap)
 import           Data.IntSet                      (IntSet)
 import           Data.Text
 import           Effectful.Concurrent.STM         (TChan, TVar)
 import qualified Streamly.Internal.FS.Event.Linux as FS (Event)
-import           System.Posix                     (CDev (CDev), CIno (CIno),
-                                                   DeviceID, FileID)
 import           Transmission.RPC.Session         (Session, SessionStats,
                                                    emptySession,
                                                    emptySessionStats)
@@ -107,6 +104,8 @@ import           Transmission.RPC.Torrent         (Torrent)
 import           Transmission.RPC.Types           (Label)
 import Streamly.Data.Stream (Stream)
 import System.Posix.ByteString (RawFilePath)
+import Log.Monad (LogT)
+import Control.DeepSeq (NFData (rnf))
 
 data Action = Global | Matched deriving (Eq, Ord)
 
@@ -117,7 +116,7 @@ data Sort = Name | PercentComplete | Downloaded | DownloadSpeed | Uploaded | Upl
 
 data UpdateEvent where
   FSEvent :: FS.Event -> UpdateEvent
-  RPCEvent :: Stream IO Torrent -> TMVar IntSet -> UpdateEvent
+  RPCEvent :: Stream (LogT IO) Torrent -> TMVar IntSet -> UpdateEvent
 
 data RPCRequest where
   RPCRequest :: { payload :: RPCPayload, chan :: TMVar ([Torrent], TMVar IntSet) } -> RPCRequest
@@ -138,12 +137,11 @@ data UIBUS where
 
 data Matcher where
   Matcher ::  {
-                maxThreads :: Int
-              , arrs :: [RawFilePath]
-              , arrIDs :: TVar (HashSet UFID)
+              arrs :: [RawFilePath]
+              , arrIDs :: TVar (IntMap IntSet)
               , arrIDsMap :: TVar (HashMap RawFilePath UFID)
-              , idToTorrents :: TVar (HashMap UFID IntSet)
-              , torrentToIDs :: TVar (IntMap (HashSet UFID))
+              , idToTorrents :: TVar (IntMap (IntMap IntSet))
+              , torrentToIDs :: TVar (IntMap (IntMap IntSet))
               , prunable :: TVar IntSet
               , prunableReady :: TVar Bool
               , eventQueue :: TBQueue UpdateEvent
@@ -239,14 +237,17 @@ data AddTorrent where
                 , startTorrent :: Bool
                 } -> AddTorrent deriving Show
 
-newtype UFID = UFID {unUFID :: (FileID, DeviceID)} deriving Eq
+data UFID = UFID {-# UNPACK #-} !Int {-# UNPACK #-} !Int deriving Eq -- UFID DevID FileID
 
 suffixLenses ''AppState
 
 suffixLenses ''AddTorrent
 
 instance Hashable UFID where
-  hashWithSalt s (UFID (CIno w, CDev w')) = hashWithSalt s (w, w')
+  hashWithSalt s (UFID w w') = hashWithSalt s (w, w')
+
+instance NFData UFID where
+  rnf (UFID d i) = rnf d `seq` rnf i
 
 newState ::  KeyConfig KeyEvent -> KeyDispatcher KeyEvent (EventM String AppState) -> Form AddTorrent Events String
          -> TVar ClientState -> TChan RPCPayload -> FileBrowser String -> AppState

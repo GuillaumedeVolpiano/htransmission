@@ -78,7 +78,9 @@ getElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> e
     Maybe IntSet -> Eff es ([Torrent], Session, SessionStats)
 getElements torrents = do
     let tids = IDs . map ID . IS.toList <$> torrents
+    logTrace_ "Requesting Torrents"
     torrents' <- getTorrents tids (Just mainTorrents) Nothing
+    logTrace_ "Torrents received"
     sesh <- getSession (Just basicSession) Nothing
     seshStats <- sessionStats Nothing
     pure (torrents', sesh, seshStats)

@@ -10,7 +10,7 @@ import           Data.IORef                             (IORef, readIORef,
                                                          writeIORef)
 import qualified Data.List.NonEmpty                     as NE (fromList)
 import qualified Streamly.Data.Stream                   as S (fromList)
-import           Streamly.Data.Stream                   (Stream, unfoldrM)
+import           Streamly.Data.Stream                   (Stream, unfoldrM, morphInner)
 import           Streamly.Data.Stream.Prelude           (constRate,
                                                          parRepeatM)
 import           Streamly.Internal.FileSystem.PosixPath (fromString_)
@@ -20,9 +20,11 @@ import           Types                                  (RPCPayload (TimerMajor,
                                                          UpdateEvent (FSEvent, RPCEvent))
 import System.Posix.ByteString (RawFilePath)
 import qualified Data.ByteString.Char8 as BS (unpack)
+import Log.Monad (LogT)
+import Control.Monad.IO.Class (liftIO)
 
-timer :: Int -> IORef Int -> TChan RPCRequest -> Stream IO UpdateEvent
-timer period counter rpcIn =  parRepeatM (constRate 2) tick
+timer :: Int -> IORef Int -> TChan RPCRequest -> Stream (LogT IO) UpdateEvent
+timer period counter rpcIn =  parRepeatM (constRate 2) (liftIO tick)
     where
       tick = do
         c <- readIORef counter
@@ -33,14 +35,14 @@ timer period counter rpcIn =  parRepeatM (constRate 2) tick
         writeIORef counter ((c + 1) `mod` period)
         pure $ RPCEvent (S.fromList res) broadcaster
 
-uiBUS :: TChan RPCPayload -> TChan RPCRequest -> Stream IO UpdateEvent
+uiBUS :: TChan RPCPayload -> TChan RPCRequest -> Stream (LogT IO) UpdateEvent
 uiBUS reqChan rpcIn = unfoldrM uievent ()
   where
     uievent _ = do
-      ev <- atomically $ readTChan reqChan
-      rpcBus <- newEmptyTMVarIO
-      atomically . writeTChan rpcIn $ RPCRequest ev rpcBus
-      (res, broadcaster) <- atomically $ readTMVar rpcBus
+      ev <- liftIO . atomically $ readTChan reqChan
+      rpcBus <- liftIO newEmptyTMVarIO
+      liftIO . atomically . writeTChan rpcIn $ RPCRequest ev rpcBus
+      (res, broadcaster) <- liftIO . atomically $ readTMVar rpcBus
       pure $ Just (RPCEvent (S.fromList res) broadcaster, ())
 
 -- | Start a recursive filesystem watcher on the given list of directory
@@ -50,5 +52,5 @@ uiBUS reqChan rpcIn = unfoldrM uievent ()
 --   resulting 'Stream'.  
 --  
 --   /Note:/ Uses Linux inotify via streamly.
-watcher :: [RawFilePath] -> Stream IO UpdateEvent
-watcher = fmap FSEvent . watchRecursive . NE.fromList . map (fromString_ . BS.unpack)
+watcher :: [RawFilePath] -> Stream (LogT IO) UpdateEvent
+watcher = fmap FSEvent . morphInner liftIO . watchRecursive . NE.fromList . map (fromString_ . BS.unpack)
