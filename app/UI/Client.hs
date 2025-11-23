@@ -24,8 +24,6 @@ import           Effectful.RPCClient      (RPCClient, notifyUI,
                                            writeCurrentTorrents, isPrunableReady)
 import qualified Effectful.RPCClient      as C (curView, reverseSort, sortKey)
 import           Effectful.Time           (Time)
-import           Effectful.Wreq           (Wreq)
-import qualified Transmission.RPC.Client  as TT (Client)
 import           Transmission.RPC.Client  (addTorrent, deleteTorrent,
                                            getSession, getTorrents,
                                            sessionStats)
@@ -36,8 +34,10 @@ import           Transmission.RPC.Types   (ID (ID), IDs (IDs), Label,
 import           Types                    (Events (Updated), RPCPayload (..),
                                            RPCRequest (..))
 import           UI.Utils                 (sel)
+import Effectful.Network.HTTP.Client (HttpClient)
+import Effectful.RPC.Client (Client)
 
-startClient :: (TT.Client :> es, Concurrent :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, RPCClient :> es)
+startClient :: (Client :> es, Concurrent :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, RPCClient :> es)
             => Eff es ()
 startClient = do
   void . forkIO . forever $ do
@@ -74,7 +74,7 @@ startClient = do
     writeCurrentTorrents . IS.fromList . map (fromJust . toId) $ torrents''
     notifyUI (Updated torrents' torrents'' sesh seshStats unmatched)
 
-getElements :: (TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es) =>
+getElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es) =>
     Maybe IntSet -> Eff es ([Torrent], Session, SessionStats)
 getElements torrents = do
     let tids = IDs . map ID . IS.toList <$> torrents
@@ -83,7 +83,7 @@ getElements torrents = do
     seshStats <- sessionStats Nothing
     pure (torrents', sesh, seshStats)
 
-addElements :: (TT.Client :> es, Wreq :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
+addElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
   [FilePath]-> FilePath -> [Label] -> Bool -> Eff es ()
 addElements fps downloadDir labels started = do
   forM_ fps $ \t -> addTorrent (Path t) Nothing (Just downloadDir) Nothing Nothing (Just . not $ started) Nothing

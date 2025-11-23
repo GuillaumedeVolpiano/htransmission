@@ -24,7 +24,6 @@ import           Effectful.Log              (LogLevel (LogTrace), mkLogger,
 import           Effectful.Prim.IORef       (runPrim)
 import           Effectful.RPCClient        (runRPCClient)
 import           Effectful.Time             (runTime)
-import           Effectful.Wreq             (runWreq)
 import           Graphics.Vty               (defaultConfig)
 import           Graphics.Vty.Platform.Unix (mkVty)
 import           Options.Applicative        (Parser, execParser, fullDesc, help,
@@ -34,14 +33,15 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
 import qualified Streamly.Generators        as S (timer, uiBUS, watcher)
 import           Streamly.Matcher           (runMatcher)
 import           System.IO                  (stderr)
-import qualified Transmission.RPC.Client    as TT (runClient)
-import           Transmission.RPC.Client    (fromUrl)
+import           Effectful.RPC.Client    as TT (runClient)
 import           Types                      (Events (LogEvent),
                                              Matcher (Matcher), newClientState,
                                              newState)
 import           UI.Client                  (startClient)
 import           UI.Constants (app, fileBrowser, addForm)
 import           UI.KeyEvents               (dispatcher, keyConfig)
+import Network.HTTP.Client (newManager, defaultManagerSettings)
+import Effectful.Network.HTTP.Client (runHttpClient)
 
 newtype Args = Args {
                  getHost :: String
@@ -80,13 +80,14 @@ main = do
       wt = max (nc - reservedThreads) 1
       matcher = Matcher wt arrPaths ais' aim' itd tid prunedVar pr eventQueue
   vty <- mkVty defaultConfig
-  client <- runEff . runWreq . runPrim $ fromUrl url Nothing Nothing
   fb <- fileBrowser
+  manager <- newManager defaultManagerSettings
   let appState = newState keyConfig dispatcher addForm clientState pay fb
   void . forkIO . forever $ atomically (readTChan logChan) >>= T.hPutStrLn stderr
   let m = runMatcher matcher [timerStream, uiStream, watchStream]
       ui = customMain vty (mkVty defaultConfig) (Just chan) app appState
-  void $ runEff .runConcurrent . TT.runClient client . runWreq
+
+  void $ runEff .runConcurrent . runClient url . runHttpClient manager
     . runPrim . runLog "Client" logger LogTrace . runTime . runFileSystem
     . runRPCClient req clientState chan ct pr $ startClient
   race_ m ui

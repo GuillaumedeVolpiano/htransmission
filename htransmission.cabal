@@ -140,7 +140,6 @@ executable htransmission
     , vector                ^>=0.13.2.0
     , vty                   ^>=6.2
     , vty-unix              ^>=0.2.0.0
-    , wreq-effectful        ^>=0.1.1.1
 
   -- Base language which the package is written in.
   default-language: Haskell2010
