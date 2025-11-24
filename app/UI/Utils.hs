@@ -1,8 +1,8 @@
 {-# LANGUAGE GADTs             #-}
 {-# LANGUAGE OverloadedStrings #-}
 module UI.Utils
-  (sel
-  , actionFromView
+  (
+    actionFromView
   , appChooseCursor
   , highlightRow
   , mkDialog
@@ -14,44 +14,18 @@ import           Brick                    (CursorLocation (CursorLocation, curso
                                            txt, withAttr)
 import           Brick.BChan              (BChan, writeBChan)
 import           Brick.Widgets.Dialog     (Dialog, dialog)
-import           Data.IntSet              (IntSet, member)
 import           Data.List                (find)
-import           Data.Maybe               (fromJust, fromMaybe, listToMaybe)
+import           Data.Maybe               (listToMaybe)
 import           Effectful                (MonadUnliftIO, withRunInIO)
-import           Effectful.Log            (Logger, mkLogger, showLogMessage)
-import           Log.Internal.Logger      (withLogger)
-import           Transmission.RPC.Torrent (Torrent, errorCode, progress,
-                                           rateDownload, rateUpload, status,
-                                           toId)
-import qualified Transmission.RPC.Types   as TT (Error (OK),
-                                                 Status (Downloading, Seeding, Stopped))
+import           Log.Internal.Logger      (withLogger, Logger)
 import           Types                    (Action (Global, Matched), AppState,
                                            DialogContent (Alert, Remove),
                                            Events (LogEvent), Menu (NoMenu),
-                                           Sort,
-                                           View (Active, Complete, Downloading, Error, Inactive, Main, Paused, Seeding, SingleTorrent, Unmatched, FileBrowser, NewTorrentForm),
-                                           getView,
+                                           View (Unmatched, FileBrowser, NewTorrentForm),
                                            mainCursor, menuCursor, visibleMenu)
 import qualified Types as T (view) 
 import           UI.Attrs                 (cursorAttr)
-import           Utils                    (sortTorrents)
-
-sel :: View -> Maybe IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
-sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filter selector
-  where
-    selector = case getView view of
-      Main              -> const True
-      Downloading       -> (== Just TT.Downloading) . status
-      Seeding           -> (== Just TT.Seeding) . status
-      Complete          -> (==100) . fromMaybe 0 . progress
-      Paused            -> (== Just TT.Stopped) . status
-      Inactive          -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
-      Error             -> (/= Just TT.OK) . errorCode
-      Unmatched         -> flip member unmatched' . fromJust . toId
-      Active            -> (\t -> rateDownload t > Just 0 || rateUpload t > Just 0)
-      SingleTorrent {}  -> undefined
-      _ -> const True
-    unmatched' = fromMaybe mempty unmatched
+import Log (mkLogger, showLogMessage)
 
 actionFromView :: View -> Action
 actionFromView Unmatched = Matched

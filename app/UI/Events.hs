@@ -49,20 +49,19 @@ import           Graphics.Vty              (Event (EvKey, EvResize),
                                             outputIface)
 import           Transmission.RPC.Torrent  (toId)
 import qualified Types                     as T (clientLog, clientState,
-                                                 curView, keyHandler, 
+                                                 curView, keyHandler, request,
                                                  reverseSort, sortKey, torrents,
                                                  unmatched, view,
-                                                 visibleTorrents, request)
+                                                 visibleTorrents)
 import           Types                     (AppState (visibleDialog),
                                             DialogContent (Alert, Remove),
                                             Events (..),
                                             Menu (NoMenu, Single, Sort),
-                                            RPCPayload (Delete, Get, Add),
-                                            View (Log, SingleTorrent, NewTorrentForm, FileBrowser, Unmatched), addForm,
-                                            addFormL, clientLogL, completed,
-                                            destination, fileBrowser,
-                                            fileBrowserL,
-                                            mainCursor,
+                                            RPCPayload (Add, Delete, Get),
+                                            View (FileBrowser, Log, NewTorrentForm, SingleTorrent, Unmatched),
+                                            addForm, addFormL, clientLogL,
+                                            completed, destination, fileBrowser,
+                                            fileBrowserL, mainCursor,
                                             mainCursorL, mainOffset,
                                             mainOffsetL, mainVisibleHeight,
                                             mainVisibleHeightL, menuCursor,
@@ -70,20 +69,19 @@ import           Types                     (AppState (visibleDialog),
                                             newTorrentsPathsL, selected,
                                             selectedL, sessionL, sessionStatsL,
                                             startTorrent, tags, torrentsL,
-                                            unmatchedL, viewL,
-                                            visibleDialogL,
+                                            unmatchedL, viewL, visibleDialogL,
                                             visibleMenu, visibleMenuL,
                                             visibleTorrentsL, visibleWidth,
                                             visibleWidthL)
-import           UI.Utils                  (mkDialog, sel)
-import           Utils                     (sortTorrents)
+import           UI.Utils                  (mkDialog)
+import           Utils                     (sel, sortTorrents)
 
 import           Brick.Forms               (formState, handleFormEvent)
 import           Brick.Types               (zoom)
 import           Control.Lens              (set)
 import           Data.Text                 (Text)
-import qualified Data.Text                 as T (unpack, splitOn, strip)
-import Transmission.RPC.Types (Label)
+import qualified Data.Text                 as T (splitOn, strip, unpack)
+import           Transmission.RPC.Types    (Label)
 
 appStartEvent :: EventM String AppState ()
 appStartEvent = do
@@ -95,7 +93,7 @@ appStartEvent = do
 eventHandler :: BrickEvent String Events -> EventM String AppState ()
 eventHandler ev = do
   view <- gets T.view
-  case view of 
+  case view of
     NewTorrentForm v -> addFormEventHandler v ev
     _ -> case ev of
                 AppEvent (Updated torrents visibleTorrents sesh seshStats unmatched) ->
@@ -103,7 +101,7 @@ eventHandler ev = do
                   . set visibleTorrentsL visibleTorrents)
                 AppEvent (LogEvent logMessage) -> appLogMessage logMessage
                 VtyEvent vev -> do
-                  case view of 
+                  case view of
                     FileBrowser v -> fileBrowserEventHandler v vev
                     _ -> do
                       case vev of
@@ -403,16 +401,16 @@ requestAddTorrent :: EventM n AppState ()
 requestAddTorrent = do
     view <- gets T.view
     case view of
-      FileBrowser _ -> pure ()
+      FileBrowser _    -> pure ()
       NewTorrentForm _ -> pure ()
-      _ -> modify (set viewL (FileBrowser view))
+      _                -> modify (set viewL (FileBrowser view))
 
 addTorrentForm :: [FilePath] -> EventM n AppState ()
 addTorrentForm fps = do
   view <- gets T.view
   let view' = case view of
                 FileBrowser v -> v
-                _ -> undefined
+                _             -> undefined
   modify (set viewL (NewTorrentForm view') . set newTorrentsPathsL fps)
 
 addTorrent :: EventM n AppState ()
@@ -427,6 +425,6 @@ addTorrent = do
       st = startTorrent s
       view' = case view of
                 NewTorrentForm v -> v
-                _ -> undefined
+                _                -> undefined
   liftIO . atomically $ writeTChan r (Add fps downloadDir labels comp st)
   modify (set viewL view' . set newTorrentsPathsL [])

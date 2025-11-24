@@ -63,6 +63,7 @@ library
   exposed-modules:
     Constants
     Effectful.RPCClient
+    Effectful.Client
     Streamly.Generators
     Streamly.Matcher
     Types
@@ -81,6 +82,7 @@ library
     , filepath              ^>=1.5.4.0
     , hashable              ^>=1.4.7.0
     , log-base              ^>=0.12.1.0
+    , log-effectful         ^>=1.0.1.0
     , stm                   ^>=2.5.3.1
     , streamly              ^>=0.11.0
     , streamly-core         ^>=0.3.0
@@ -104,7 +106,6 @@ executable htransmission
   -- Modules included in this executable, other than Main.
   other-modules:
     UI.Attrs
-    UI.Client
     UI.Constants
     UI.Events
     UI.KeyEvents
@@ -131,7 +132,6 @@ executable htransmission
     , http-client           ^>=0.7.1.9
     , lens                  ^>=5.3.3
     , log-base              ^>=0.12.1.0
-    , log-effectful         ^>=1.0.1.0
     , monad-time-effectful  ^>=1.0.0.0
     , optparse-applicative  ^>=0.18.1.0
     , stm                   ^>=2.5.3.1

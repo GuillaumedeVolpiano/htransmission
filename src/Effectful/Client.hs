@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators     #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
-module UI.Client (
+module Effectful.Client (
                    startClient
                  )
 where
@@ -16,9 +16,7 @@ import           Effectful                         (Eff, (:>))
 import           Effectful.Concurrent              (Concurrent, forkIO)
 import           Effectful.Concurrent.STM          (atomically, newEmptyTMVarIO,
                                                     putTMVar, readTMVar)
-import           Effectful.FileSystem              (FileSystem)
-import           Effectful.Log                     (Log, logInfo_, logTrace_)
-import           Effectful.Network.HTTP.Client     (HttpClient)
+import           Effectful.Log                     (logInfo_, logTrace_)
 import           Effectful.Prim                    (Prim)
 import           Effectful.RPCClient               (RPCClient, isPrunableReady,
                                                     notifyUI,
@@ -27,8 +25,7 @@ import           Effectful.RPCClient               (RPCClient, isPrunableReady,
                                                     writeCurrentTorrents)
 import qualified Effectful.RPCClient               as C (curView, reverseSort,
                                                          sortKey)
-import           Effectful.Time                    (Time)
-import           Effectful.Transmission.RPC.Client (Client)
+import           Effectful.Transmission.RPC.Client (FullClient)
 import           Transmission.RPC.Client           (addTorrent, deleteTorrent,
                                                     getSession, getTorrents,
                                                     sessionStats)
@@ -39,9 +36,9 @@ import           Transmission.RPC.Types            (ID (ID), IDs (IDs), Label,
 import           Types                             (Events (Updated),
                                                     RPCPayload (..),
                                                     RPCRequest (..))
-import           UI.Utils                          (sel)
+import           Utils                             (sel)
 
-startClient :: (Client :> es, Concurrent :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, RPCClient :> es)
+startClient :: (FullClient es, Concurrent :> es, Prim :> es, RPCClient :> es)
             => Eff es ()
 startClient = do
   void . forkIO . forever $ do
@@ -78,7 +75,7 @@ startClient = do
     writeCurrentTorrents . IS.fromList . map (fromJust . toId) $ torrents''
     notifyUI (Updated torrents' torrents'' sesh seshStats unmatched)
 
-getElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
+getElements :: (FullClient es, Prim :> es) =>
     Maybe IntSet -> Eff es ([Torrent], Session, SessionStats)
 getElements torrents = do
     let tids = IDs . map ID . IS.toList <$> torrents
@@ -89,7 +86,7 @@ getElements torrents = do
     seshStats <- sessionStats Nothing
     pure (torrents', sesh, seshStats)
 
-addElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
+addElements :: (FullClient es, Prim :> es) =>
   [FilePath]-> FilePath -> [Label] -> Bool -> Eff es ()
 addElements fps downloadDir labels started = do
   forM_ fps $ \t -> addTorrent (Path t) Nothing (Just downloadDir) Nothing Nothing (Just . not $ started) Nothing

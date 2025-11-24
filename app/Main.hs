@@ -18,8 +18,6 @@ import           Data.IORef                    (newIORef)
 import qualified Data.Text.IO                  as T
 import           Effectful                     (runEff)
 import           Effectful.Concurrent          (runConcurrent)
-import           Effectful.Log                 (LogLevel (LogTrace), mkLogger,
-                                                showLogMessage)
 import           Effectful.Prim.IORef          (runPrim)
 import           Effectful.Transmission.RPC.Client (runFullClient)
 import           Effectful.RPCClient           (runRPCClient)
@@ -38,9 +36,11 @@ import           System.IO                     (stderr)
 import           Types                         (Events (LogEvent),
                                                 Matcher (Matcher),
                                                 newClientState, newState)
-import           UI.Client                     (startClient)
+import           Effectful.Client                     (startClient)
 import           UI.Constants                  (addForm, app, fileBrowser)
 import           UI.KeyEvents                  (dispatcher, keyConfig)
+import Log (mkLogger, LogLevel (LogTrace))
+import Log.Data (showLogMessage)
 
 newtype Args = Args {
                  getHost :: String

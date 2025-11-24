@@ -15,6 +15,7 @@ module Utils
   , deleteFromUFIDPseudoSet
   , lookupUFIDPseudoMap
   , ufidPseudoSetIntersection
+  , sel
   )
 where
 import           Control.Exception            (IOException, bracket, try)
@@ -31,12 +32,12 @@ import qualified Data.IntMap.Strict           as IM (filter, findWithDefault,
                                                      insertWith,
                                                      intersectionWith, lookup,
                                                      unionWith, update)
-import           Data.IntSet                  (IntSet)
+import           Data.IntSet                  (IntSet, member)
 import qualified Data.IntSet                  as IS (delete, intersection, null,
                                                      singleton, union)
 import           Data.List                    (isPrefixOf, sortBy)
 import qualified Data.List                    as L (uncons)
-import           Data.Maybe                   (fromJust)
+import           Data.Maybe                   (fromJust, fromMaybe)
 import           Data.Sequence                (Seq (Empty, (:<|)))
 import qualified Data.Sequence                as Sq (singleton)
 import qualified Streamly.Data.Fold           as F (foldl')
@@ -60,8 +61,9 @@ import           Transmission.RPC.Torrent     (Torrent, addedDate, downloadDir,
                                                peersConnected, percentComplete,
                                                rateDownload, rateUpload, ratio,
                                                toId, totalSize, uploadedEver,
-                                               webseeds)
-import           Types                        (PathMap, Sort (..), UFID (UFID))
+                                               webseeds, status, progress, errorCode)
+import           Types                        (PathMap, Sort (..), UFID (UFID), View (Main, Downloading, Seeding, Complete, Paused, Inactive, Error, Unmatched, Active, SingleTorrent), getView)
+import qualified Transmission.RPC.Types as TT (Status (Downloading, Seeding, Stopped), Error (OK))
 
 splitDirectories :: RawFilePath -> [RawFilePath]
 splitDirectories = map dropTrailingPathSeparator . splitPath
@@ -244,3 +246,20 @@ timeIt action = do
   end <- liftIO $ getTime Monotonic
   let durationMS = fromIntegral (toNanoSecs (end - start)) / 1e6 :: Double
   pure (result, round durationMS)
+
+sel :: View -> Maybe IntSet -> Sort -> Bool -> [Torrent] -> [Torrent]
+sel view unmatched sortKey reverseSort = sortTorrents sortKey reverseSort. filter selector
+  where
+    selector = case getView view of
+      Main              -> const True
+      Downloading       -> (== Just TT.Downloading) . status
+      Seeding           -> (== Just TT.Seeding) . status
+      Complete          -> (==100) . fromMaybe 0 . progress
+      Paused            -> (== Just TT.Stopped) . status
+      Inactive          -> (\t -> rateDownload t == Just 0 && rateUpload t == Just 0)
+      Error             -> (/= Just TT.OK) . errorCode
+      Unmatched         -> flip member unmatched' . fromJust . toId
+      Active            -> (\t -> rateDownload t > Just 0 || rateUpload t > Just 0)
+      SingleTorrent {}  -> undefined
+      _ -> const True
+    unmatched' = fromMaybe mempty unmatched
