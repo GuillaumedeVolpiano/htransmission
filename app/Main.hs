@@ -18,14 +18,11 @@ import           Data.IORef                    (newIORef)
 import qualified Data.Text.IO                  as T
 import           Effectful                     (runEff)
 import           Effectful.Concurrent          (runConcurrent)
-import           Effectful.FileSystem          (runFileSystem)
 import           Effectful.Log                 (LogLevel (LogTrace), mkLogger,
-                                                runLog, showLogMessage)
-import           Effectful.Network.HTTP.Client (runHttpClient)
+                                                showLogMessage)
 import           Effectful.Prim.IORef          (runPrim)
-import           Effectful.RPC.Client          as TT (runClient)
+import           Effectful.Transmission.RPC.Client (runFullClient)
 import           Effectful.RPCClient           (runRPCClient)
-import           Effectful.Time                (runTime)
 import           Graphics.Vty                  (defaultConfig)
 import           Graphics.Vty.Platform.Unix    (mkVty)
 import           Log.Monad                     (runLogT)
@@ -86,7 +83,6 @@ main = do
   let m = runLogT "Matcher" logger LogTrace $ runMatcher matcher [timerStream, uiStream, watchStream]
       ui = customMain vty (mkVty defaultConfig) (Just chan) app appState
   forkIO $ runLogT "arrBuilder" logger LogTrace $ buildArrs matcher
-  void $ runEff .runConcurrent . runClient url . runHttpClient manager
-    . runPrim . runLog "Client" logger LogTrace . runTime . runFileSystem
+  void $ runEff .runConcurrent . runPrim . runFullClient url manager "Client" logger LogTrace
     . runRPCClient req clientState chan ct pr $ startClient
   race_ m ui

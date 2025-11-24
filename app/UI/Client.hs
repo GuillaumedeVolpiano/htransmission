@@ -6,36 +6,40 @@ module UI.Client (
                    startClient
                  )
 where
-import           Constants                (basicSession, mainTorrents)
-import           Control.Monad            (forever, void, forM_)
-import           Data.IntSet              (IntSet)
-import qualified Data.IntSet              as IS (fromList, toList)
-import           Data.Maybe               (fromJust)
-import qualified Data.Text                as T (pack)
-import           Effectful                (Eff, (:>))
-import           Effectful.Concurrent     (Concurrent, forkIO)
-import           Effectful.Concurrent.STM (atomically, newEmptyTMVarIO,
-                                           putTMVar, readTMVar)
-import           Effectful.FileSystem     (FileSystem)
-import           Effectful.Log            (Log, logInfo_, logTrace_)
-import           Effectful.Prim           (Prim)
-import           Effectful.RPCClient      (RPCClient, notifyUI,
-                                           readCurrentTorrents, readRPC,
-                                           writeCurrentTorrents, isPrunableReady)
-import qualified Effectful.RPCClient      as C (curView, reverseSort, sortKey)
-import           Effectful.Time           (Time)
-import           Transmission.RPC.Client  (addTorrent, deleteTorrent,
-                                           getSession, getTorrents,
-                                           sessionStats)
-import           Transmission.RPC.Session (Session, SessionStats)
-import           Transmission.RPC.Torrent (Torrent, toId)
-import           Transmission.RPC.Types   (ID (ID), IDs (IDs), Label,
-                                           TorrentRef (Path))
-import           Types                    (Events (Updated), RPCPayload (..),
-                                           RPCRequest (..))
-import           UI.Utils                 (sel)
-import Effectful.Network.HTTP.Client (HttpClient)
-import Effectful.RPC.Client (Client)
+import           Constants                         (basicSession, mainTorrents)
+import           Control.Monad                     (forM_, forever, void)
+import           Data.IntSet                       (IntSet)
+import qualified Data.IntSet                       as IS (fromList, toList)
+import           Data.Maybe                        (fromJust)
+import qualified Data.Text                         as T (pack)
+import           Effectful                         (Eff, (:>))
+import           Effectful.Concurrent              (Concurrent, forkIO)
+import           Effectful.Concurrent.STM          (atomically, newEmptyTMVarIO,
+                                                    putTMVar, readTMVar)
+import           Effectful.FileSystem              (FileSystem)
+import           Effectful.Log                     (Log, logInfo_, logTrace_)
+import           Effectful.Network.HTTP.Client     (HttpClient)
+import           Effectful.Prim                    (Prim)
+import           Effectful.RPCClient               (RPCClient, isPrunableReady,
+                                                    notifyUI,
+                                                    readCurrentTorrents,
+                                                    readRPC,
+                                                    writeCurrentTorrents)
+import qualified Effectful.RPCClient               as C (curView, reverseSort,
+                                                         sortKey)
+import           Effectful.Time                    (Time)
+import           Effectful.Transmission.RPC.Client (Client)
+import           Transmission.RPC.Client           (addTorrent, deleteTorrent,
+                                                    getSession, getTorrents,
+                                                    sessionStats)
+import           Transmission.RPC.Session          (Session, SessionStats)
+import           Transmission.RPC.Torrent          (Torrent, toId)
+import           Transmission.RPC.Types            (ID (ID), IDs (IDs), Label,
+                                                    TorrentRef (Path))
+import           Types                             (Events (Updated),
+                                                    RPCPayload (..),
+                                                    RPCRequest (..))
+import           UI.Utils                          (sel)
 
 startClient :: (Client :> es, Concurrent :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es, RPCClient :> es)
             => Eff es ()
@@ -74,7 +78,7 @@ startClient = do
     writeCurrentTorrents . IS.fromList . map (fromJust . toId) $ torrents''
     notifyUI (Updated torrents' torrents'' sesh seshStats unmatched)
 
-getElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es) =>
+getElements :: (Client :> es, HttpClient :> es, Prim :> es, Log :> es, Time :> es, FileSystem :> es) =>
     Maybe IntSet -> Eff es ([Torrent], Session, SessionStats)
 getElements torrents = do
     let tids = IDs . map ID . IS.toList <$> torrents
